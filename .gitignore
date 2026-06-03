@@ -1,0 +1,62 @@
+# ── Virtual environment ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Python cache ──────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# ── Build / dist ──────────────────────────────────────────────────────────────
+build/
+dist/
+*.egg-info/
+*.egg
+wheels/
+*.whl
+
+# ── Testing & coverage ────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.coveragerc
+.tox/
+
+# ── Secrets & credentials ─────────────────────────────────────────────────────
+.env
+config.yaml          # contains Snowflake/Databricks passwords — never commit
+*.key
+*.pem
+*.p12
+
+# ── Generated data — local only ───────────────────────────────────────────────
+reports/             # profile JSON results
+sample.db            # SQLite sample database
+*.db                 # any other SQLite databases
+profiling_history.json
+profiler_alerts.log
+*.log
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Windows ───────────────────────────────────────────────────────────────────
+ehthumbs.db
+$RECYCLE.BIN/
+
+# ── Type checking ─────────────────────────────────────────────────────────────
+.mypy_cache/
+.pytype/
+.pyre/
