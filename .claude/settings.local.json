@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(python3 --version 2>$null)",
+      "PowerShell(py --version 2>$null)",
+      "PowerShell(winget --version)",
+      "PowerShell(winget install Python.Python.3.12 --accept-package-agreements --accept-source-agreements --silent)",
+      "PowerShell(New-Item -ItemType Directory -Force \"c:\\\\Users\\\\TiagoOrtega\\\\snowflake_profiler\\\\platforms\")",
+      "PowerShell(cd \"c:\\\\Users\\\\TiagoOrtega\\\\snowflake_profiler\"; & \".\\\\.venv\\\\Scripts\\\\python.exe\" -m pip install \"databricks-sql-connector>=3.0.0\" --quiet; Write-Host \"Exit: $LASTEXITCODE\")"
+    ]
+  }
+}

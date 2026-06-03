@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block title %} — Run Profile{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center mb-4">
+  <div>
+    <h5 class="mb-1"><i class="bi bi-play-circle me-2"></i>Run Profile</h5>
+    <small class="text-muted">Compute statistics for a single table in Snowflake</small>
+  </div>
+</div>
+
+<div class="row g-4">
+
+  <!-- Selector form -->
+  <div class="col-md-5">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-search"></i> Select Table</div>
+      <div class="card-body d-flex flex-column gap-3">
+
+        <div>
+          <label class="form-label">Database</label>
+          <div class="input-group">
+            <input type="text" id="db" class="form-control"
+                   value="{{ cfg.snowflake.database }}" placeholder="MY_DATABASE">
+            <button class="btn btn-outline-secondary" type="button"
+                    title="Load schemas" onclick="loadSchemas()">
+              <i class="bi bi-arrow-clockwise"></i>
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label class="form-label">Schema</label>
+          <input type="text" id="schema" class="form-control"
+                 value="{{ cfg.snowflake.schema }}" placeholder="PUBLIC"
+                 oninput="document.getElementById('schemaSelect').value='';">
+          <select id="schemaSelect" class="form-select mt-1" style="display:none;"
+                  onchange="if(this.value){document.getElementById('schema').value=this.value; loadTables();}">
+            <option value="">— select schema —</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="form-label">Table</label>
+          <div class="input-group">
+            <input type="text" id="table" class="form-control" placeholder="MY_TABLE"
+                   oninput="document.getElementById('tableSelect').value='';">
+            <button class="btn btn-outline-secondary" type="button"
+                    title="Load tables" onclick="loadTables()">
+              <i class="bi bi-arrow-clockwise"></i>
+            </button>
+          </div>
+          <select id="tableSelect" class="form-select mt-1" style="display:none;"
+                  onchange="if(this.value) document.getElementById('table').value=this.value;">
+            <option value="">— select table —</option>
+          </select>
+        </div>
+
+        <button id="profileBtn" type="button" class="btn btn-primary mt-1" onclick="startProfile()">
+          <i class="bi bi-play-fill me-1"></i> Profile Table
+        </button>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Progress / result -->
+  <div class="col-md-7">
+
+    <!-- Hint (shown initially) -->
+    <div id="hintPanel" class="card" style="border-style:dashed; border-color:var(--border);">
+      <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-bar-chart-line" style="font-size:3rem; opacity:.3;"></i>
+        <p class="mt-3 mb-1">Choose a database, schema and table, then click <b>Profile Table</b>.</p>
+        <p class="mb-0" style="font-size:12px;">
+          Results are saved to <code>{{ cfg.output_dir }}/</code> and viewable as HTML reports.<br>
+          Profiling runs queries directly in Snowflake — no data is transferred.
+        </p>
+      </div>
+    </div>
+
+    <!-- Running -->
+    <div id="progressPanel" style="display:none;">
+      <div class="card">
+        <div class="card-header"><i class="bi bi-hourglass-split"></i> Profiling…</div>
+        <div class="card-body text-center py-4">
+          <div class="spinner-border text-primary mb-3" role="status" style="width:2rem;height:2rem;"></div>
+          <p id="progressText" class="mb-0 text-muted" style="font-size:12px;"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Done -->
+    <div id="resultPanel" style="display:none;">
+      <div class="card">
+        <div class="card-header" style="color:var(--green);"><i class="bi bi-check-circle"></i> Profile Complete</div>
+        <div class="card-body">
+          <table class="table table-sm mb-3">
+            <tbody>
+              <tr><td class="text-muted">Table</td>   <td id="resTable" style="font-family:monospace;"></td></tr>
+              <tr><td class="text-muted">Rows</td>    <td id="resRows"></td></tr>
+              <tr><td class="text-muted">Columns</td> <td id="resCols"></td></tr>
+              <tr><td class="text-muted">Alerts</td>  <td id="resAlerts"></td></tr>
+            </tbody>
+          </table>
+          <a id="reportLink" href="#" class="btn btn-primary w-100">
+            <i class="bi bi-bar-chart-line me-1"></i> View Full Report
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error -->
+    <div id="errorPanel" style="display:none;">
+      <div class="alert alert-danger d-flex gap-2 align-items-start mb-0">
+        <i class="bi bi-x-octagon-fill mt-1"></i>
+        <div>
+          <b>Profiling failed</b><br>
+          <span id="errorText" style="font-size:12px;"></span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Pre-fill from query string (used by "Re-profile" link on report page)
+(function () {
+  const p = new URLSearchParams(location.search);
+  if (p.get('db'))     document.getElementById('db').value     = p.get('db');
+  if (p.get('schema')) document.getElementById('schema').value = p.get('schema');
+  if (p.get('table'))  document.getElementById('table').value  = p.get('table');
+})();
+
+async function loadSchemas() {
+  const db = document.getElementById('db').value.trim();
+  if (!db) return;
+  try {
+    const d = await (await fetch(`/api/schemas?database=${encodeURIComponent(db)}`)).json();
+    if (d.schemas && d.schemas.length) {
+      const sel = document.getElementById('schemaSelect');
+      sel.innerHTML = '<option value="">— select schema —</option>' +
+        d.schemas.map(s => `<option value="${s}">${s}</option>`).join('');
+      sel.style.display = '';
+    }
+  } catch {}
+}
+
+async function loadTables() {
+  const db     = document.getElementById('db').value.trim();
+  const schema = document.getElementById('schema').value.trim();
+  if (!db || !schema) return;
+  try {
+    const d = await (await fetch(`/api/tables?database=${encodeURIComponent(db)}&schema=${encodeURIComponent(schema)}`)).json();
+    if (d.tables && d.tables.length) {
+      const sel = document.getElementById('tableSelect');
+      sel.innerHTML = '<option value="">— select table —</option>' +
+        d.tables.map(t => `<option value="${t}">${t}</option>`).join('');
+      sel.style.display = '';
+    }
+  } catch {}
+}
+
+function showPanel(name) {
+  ['hintPanel','progressPanel','resultPanel','errorPanel'].forEach(id => {
+    document.getElementById(id).style.display = id === name ? '' : 'none';
+  });
+}
+
+async function startProfile() {
+  const db     = document.getElementById('db').value.trim();
+  const schema = document.getElementById('schema').value.trim();
+  const table  = document.getElementById('table').value.trim();
+  if (!db || !schema || !table) { alert('Fill in database, schema and table.'); return; }
+
+  document.getElementById('profileBtn').disabled = true;
+  document.getElementById('progressText').textContent = `Profiling ${db}.${schema}.${table}…`;
+  showPanel('progressPanel');
+
+  let jobId;
+  try {
+    const r = await fetch('/api/profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ database: db, schema, table }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    jobId = d.job_id;
+  } catch (e) { showError(e.message); return; }
+
+  const poll = setInterval(async () => {
+    try {
+      const job = await (await fetch(`/api/profile/${jobId}`)).json();
+      if (job.status === 'done') {
+        clearInterval(poll);
+        showResult(job, db, schema, table);
+      } else if (job.status === 'error') {
+        clearInterval(poll);
+        showError(job.error || 'Unknown error');
+      }
+    } catch (e) { clearInterval(poll); showError(e.message); }
+  }, 1500);
+}
+
+function showResult(job, db, schema, table) {
+  document.getElementById('resTable').textContent = `${db}.${schema}.${table}`;
+  document.getElementById('resRows').textContent  = (job.row_count ?? 0).toLocaleString();
+  document.getElementById('resCols').textContent  = job.column_count ?? '—';
+  const ac = job.alert_count || 0;
+  document.getElementById('resAlerts').innerHTML = ac > 0
+    ? `<span class="badge" style="background:var(--yellow);color:#000;">${ac} alert${ac!==1?'s':''}</span>`
+    : `<span class="badge" style="background:var(--green);">none</span>`;
+  document.getElementById('reportLink').href =
+    `/report?db=${encodeURIComponent(db)}&schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`;
+  document.getElementById('profileBtn').disabled = false;
+  showPanel('resultPanel');
+}
+
+function showError(msg) {
+  document.getElementById('errorText').textContent = msg;
+  document.getElementById('profileBtn').disabled = false;
+  showPanel('errorPanel');
+}
+</script>
+{% endblock %}

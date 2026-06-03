@@ -1,0 +1,668 @@
+{
+  "SAMPLE_DW.RETAIL.DIM_CUSTOMER": {
+    "row_count": 500,
+    "profiled_at": "2026-06-03T13:59:52.563980",
+    "columns": {
+      "CUSTOMER_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 144.4818327679989,
+        "variance": 20875.0,
+        "mean": 250.5,
+        "min_val": 1.0,
+        "max_val": 500.0
+      },
+      "CUSTOMER_ID": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "FIRST_NAME": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "LAST_NAME": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "EMAIL": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "GENDER": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "BIRTH_DATE": {
+        "null_rate": 0.05,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "CITY": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "STATE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "COUNTRY": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "CUSTOMER_SEGMENT": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "REGISTRATION_DATE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      }
+    }
+  },
+  "SAMPLE_DW.RETAIL.DIM_PRODUCT": {
+    "row_count": 400,
+    "profiled_at": "2026-06-03T14:01:09.204492",
+    "columns": {
+      "PRODUCT_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 57.80660870523369,
+        "variance": 3341.60401,
+        "mean": 100.5,
+        "min_val": 1.0,
+        "max_val": 200.0
+      },
+      "PRODUCT_ID": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "PRODUCT_NAME": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "CATEGORY": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "SUBCATEGORY": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "BRAND": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "UNIT_COST": {
+        "null_rate": 0.0,
+        "std_dev": 238.08167959578054,
+        "variance": 56682.8861591479,
+        "mean": 183.9075,
+        "min_val": 2.0,
+        "max_val": 1190.0
+      },
+      "UNIT_PRICE": {
+        "null_rate": 0.0,
+        "std_dev": 370.94936786427684,
+        "variance": 137603.4335189066,
+        "mean": 279.336375,
+        "min_val": 3.54,
+        "max_val": 2130.1
+      },
+      "MARGIN_PCT": {
+        "null_rate": 0.0,
+        "std_dev": 7.422273618925673,
+        "variance": 55.0901456742,
+        "mean": 33.0713,
+        "min_val": 20.0,
+        "max_val": 44.44
+      },
+      "IS_ACTIVE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      }
+    }
+  },
+  "SAMPLE_DW.RETAIL.DIM_STORE": {
+    "row_count": 50,
+    "profiled_at": "2026-06-03T16:59:58.472883",
+    "columns": {
+      "STORE_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 14.577379737113251,
+        "variance": 212.5,
+        "mean": 25.5,
+        "min_val": 1.0,
+        "max_val": 50.0
+      },
+      "STORE_ID": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "STORE_NAME": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "CITY": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "STATE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "REGION": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "STORE_TYPE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "OPEN_DATE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "SQUARE_FOOTAGE": {
+        "null_rate": 0.0,
+        "std_dev": 3991.168205844875,
+        "variance": 15929423.647347,
+        "mean": 6250.84,
+        "min_val": 1504.0,
+        "max_val": 14239.0
+      }
+    }
+  },
+  "SAMPLE_DW.RETAIL.FACT_SALES": {
+    "row_count": 20000,
+    "profiled_at": "2026-06-03T17:28:56.669399",
+    "columns": {
+      "SALE_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 2886.823503004102,
+        "variance": 8333749.9374968745,
+        "mean": 5000.5,
+        "min_val": 1.0,
+        "max_val": 10000.0
+      },
+      "DATE_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 5004.127042886672,
+        "variance": 25041287.461349707,
+        "mean": 20235618.6693,
+        "min_val": 20230101.0,
+        "max_val": 20241230.0
+      },
+      "CUSTOMER_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 144.9444199339992,
+        "variance": 21008.8848700035,
+        "mean": 251.0132,
+        "min_val": 1.0,
+        "max_val": 500.0
+      },
+      "PRODUCT_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 57.379318909359014,
+        "variance": 3292.386238501925,
+        "mean": 99.5241,
+        "min_val": 1.0,
+        "max_val": 200.0
+      },
+      "STORE_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 14.465259456593143,
+        "variance": 209.24373114655734,
+        "mean": 25.2652,
+        "min_val": 1.0,
+        "max_val": 50.0
+      },
+      "EMPLOYEE_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 28.84497114954409,
+        "variance": 832.0323606180309,
+        "mean": 50.679,
+        "min_val": 1.0,
+        "max_val": 100.0
+      },
+      "PROMOTION_KEY": {
+        "null_rate": 0.5047,
+        "std_dev": 8.603134267839168,
+        "variance": 74.01391923046857,
+        "mean": 15.507974964667879,
+        "min_val": 1.0,
+        "max_val": 30.0
+      },
+      "TRANSACTION_ID": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "PAYMENT_METHOD": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "QUANTITY": {
+        "null_rate": 0.0,
+        "std_dev": 1.3324008235503797,
+        "variance": 1.77529195459773,
+        "mean": 2.5959,
+        "min_val": 1.0,
+        "max_val": 9.0
+      },
+      "UNIT_PRICE": {
+        "null_rate": 0.0,
+        "std_dev": 372.0898840165805,
+        "variance": 138450.88178747235,
+        "mean": 281.3778155,
+        "min_val": 3.54,
+        "max_val": 2130.1
+      },
+      "UNIT_COST": {
+        "null_rate": 0.0,
+        "std_dev": 239.79229654176035,
+        "variance": 57500.34548077154,
+        "mean": 185.38495,
+        "min_val": 2.0,
+        "max_val": 1190.0
+      },
+      "DISCOUNT_AMOUNT": {
+        "null_rate": 0.0,
+        "std_dev": 248.53743286033117,
+        "variance": 61770.855532803624,
+        "mean": 87.9863975,
+        "min_val": 0.0,
+        "max_val": 5204.78
+      },
+      "GROSS_AMOUNT": {
+        "null_rate": 0.0,
+        "std_dev": 1168.072832335255,
+        "variance": 1364394.1416397048,
+        "mean": 729.786244,
+        "min_val": 3.54,
+        "max_val": 14910.7
+      },
+      "NET_AMOUNT": {
+        "null_rate": 0.0,
+        "std_dev": 1057.8567390618816,
+        "variance": 1119060.880378638,
+        "mean": 641.799969,
+        "min_val": 1.88,
+        "max_val": 14910.7
+      },
+      "TAX_AMOUNT": {
+        "null_rate": 0.0,
+        "std_dev": 84.62855197573113,
+        "variance": 7161.991809509025,
+        "mean": 51.3439505,
+        "min_val": 0.15,
+        "max_val": 1192.86
+      },
+      "MARGIN_AMOUNT": {
+        "null_rate": 0.0,
+        "std_dev": 394.16037348736387,
+        "variance": 155362.40002769817,
+        "mean": 219.02286150000003,
+        "min_val": 0.54,
+        "max_val": 6580.7
+      }
+    }
+  },
+  "SAMPLE_DW.RETAIL.DIM_EMPLOYEE": {
+    "row_count": 100,
+    "profiled_at": "2026-06-03T17:22:11.677597",
+    "columns": {
+      "EMPLOYEE_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 29.011491975882016,
+        "variance": 841.6666666666666,
+        "mean": 50.5,
+        "min_val": 1.0,
+        "max_val": 100.0
+      },
+      "EMPLOYEE_ID": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "FIRST_NAME": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "LAST_NAME": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "JOB_TITLE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "DEPARTMENT": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "STORE_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 14.503569745188091,
+        "variance": 210.35353535353536,
+        "mean": 25.5,
+        "min_val": 1.0,
+        "max_val": 50.0
+      },
+      "HIRE_DATE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "IS_ACTIVE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      }
+    }
+  },
+  "SAMPLE_DW.RETAIL.DIM_DATE": {
+    "row_count": 1460,
+    "profiled_at": "2026-06-03T17:23:37.816520",
+    "columns": {
+      "DATE_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 5012.2186887820135,
+        "variance": 25122336.18417569,
+        "mean": 20235666.95068493,
+        "min_val": 20230101.0,
+        "max_val": 20241230.0
+      },
+      "FULL_DATE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "DAY_OF_WEEK": {
+        "null_rate": 0.0,
+        "std_dev": 2.00238574409694,
+        "variance": 4.0095486681626555,
+        "mean": 2.993150684931507,
+        "min_val": 0.0,
+        "max_val": 6.0
+      },
+      "DAY_NAME": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "DAY_OF_MONTH": {
+        "null_rate": 0.0,
+        "std_dev": 8.794810334428782,
+        "variance": 77.34868881857531,
+        "mean": 15.717808219178082,
+        "min_val": 1.0,
+        "max_val": 31.0
+      },
+      "DAY_OF_YEAR": {
+        "null_rate": 0.0,
+        "std_dev": 105.40213148439196,
+        "variance": 11109.60932145305,
+        "mean": 183.0,
+        "min_val": 1.0,
+        "max_val": 365.0
+      },
+      "WEEK_OF_YEAR": {
+        "null_rate": 0.0,
+        "std_dev": 15.05222801439692,
+        "variance": 226.56956819739548,
+        "mean": 26.5,
+        "min_val": 1.0,
+        "max_val": 52.0
+      },
+      "MONTH_NUM": {
+        "null_rate": 0.0,
+        "std_dev": 3.4471211660219185,
+        "variance": 11.882644333236312,
+        "mean": 6.512328767123288,
+        "min_val": 1.0,
+        "max_val": 12.0
+      },
+      "MONTH_NAME": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "QUARTER": {
+        "null_rate": 0.0,
+        "std_dev": 1.1171772922807,
+        "variance": 1.2480851023876365,
+        "mean": 2.5054794520547947,
+        "min_val": 1.0,
+        "max_val": 4.0
+      },
+      "YEAR": {
+        "null_rate": 0.0,
+        "std_dev": 0.5001713208890434,
+        "variance": 0.25017135023989034,
+        "mean": 2023.5,
+        "min_val": 2023.0,
+        "max_val": 2024.0
+      },
+      "IS_WEEKEND": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "IS_HOLIDAY": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      }
+    }
+  },
+  "SAMPLE_DW.RETAIL.DIM_PROMOTION": {
+    "row_count": 30,
+    "profiled_at": "2026-06-03T17:24:35.980060",
+    "columns": {
+      "PROMOTION_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 8.803408430829505,
+        "variance": 77.5,
+        "mean": 15.5,
+        "min_val": 1.0,
+        "max_val": 30.0
+      },
+      "PROMOTION_ID": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "PROMOTION_NAME": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "PROMOTION_TYPE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "DISCOUNT_PERCENT": {
+        "null_rate": 0.0,
+        "std_dev": 13.707494384417984,
+        "variance": 187.89540229885057,
+        "mean": 24.366666666666667,
+        "min_val": 6.0,
+        "max_val": 49.0
+      },
+      "START_DATE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "END_DATE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "IS_ACTIVE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      }
+    }
+  }
+}

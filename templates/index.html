@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %} — Dashboard{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-start mb-4">
+  <div>
+    <h5 class="mb-1">Dashboard</h5>
+    <small class="text-muted">All profiled tables</small>
+  </div>
+  <div class="ms-auto d-flex gap-2">
+    <a href="{{ url_for('profile_page') }}" class="btn btn-primary btn-sm">
+      <i class="bi bi-play-circle me-1"></i> Profile a Table
+    </a>
+  </div>
+</div>
+
+<!-- Summary cards -->
+<div class="row g-3 mb-4">
+  <div class="col-sm-4">
+    <div class="card stat-card">
+      <div class="stat-value" style="color:var(--accent);">{{ reports|length }}</div>
+      <div class="stat-label">Tables Profiled</div>
+    </div>
+  </div>
+  <div class="col-sm-4">
+    <div class="card stat-card">
+      <div class="stat-value" style="color:var(--green);">
+        {% if reports %}{{ "{:,}".format(reports[0].row_count) }}{% else %}—{% endif %}
+      </div>
+      <div class="stat-label">Latest Row Count</div>
+    </div>
+  </div>
+  <div class="col-sm-4">
+    <div class="card stat-card">
+      <div class="stat-value" style="color:var(--yellow);">
+        {% if reports %}{{ reports[0].column_count }}{% else %}—{% endif %}
+      </div>
+      <div class="stat-label">Latest Columns</div>
+    </div>
+  </div>
+</div>
+
+<!-- Source filter -->
+{% if reports %}
+{% set sources = reports | map(attribute='source_name') | select | unique | list %}
+{% if sources | length > 1 %}
+<div class="mb-3 d-flex gap-2 align-items-center flex-wrap" style="font-size:12px;">
+  <span style="color:var(--muted);">Filter by source:</span>
+  <button class="btn btn-sm source-filter-btn active-filter"
+          style="font-size:11px; padding:2px 10px;"
+          onclick="filterSource(null, this)">All</button>
+  {% for src in sources %}
+  <button class="btn btn-sm source-filter-btn btn-outline-secondary"
+          style="font-size:11px; padding:2px 10px;"
+          onclick="filterSource('{{ src }}', this)">{{ src }}</button>
+  {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+
+<!-- Table list -->
+<div class="card">
+  <div class="card-header d-flex align-items-center">
+    <i class="bi bi-table me-1"></i> Profiled Tables
+    <span class="ms-auto badge" style="background:var(--border);color:var(--muted);">
+      {{ reports|length }}
+    </span>
+  </div>
+
+  {% if reports %}
+  <div style="overflow-x:auto;">
+    <table class="table table-hover" id="profilesTable">
+      <thead>
+        <tr>
+          <th>Table</th>
+          <th>Source</th>
+          <th class="text-end" style="width:110px;">Rows</th>
+          <th class="text-end" style="width:70px;">Cols</th>
+          <th style="width:160px;">Profiled At</th>
+          <th style="width:90px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in reports %}
+        {% set platform_icons = {'snowflake':'bi-snow3','sqlite':'bi-file-earmark-zip','databricks':'bi-lightning-charge'} %}
+        {% set src = r.source_name or 'Unknown' %}
+        <tr data-source="{{ src }}">
+          <td>
+            <code style="font-size:12px;">{{ r.database }}.{{ r.schema }}.{{ r.table }}</code>
+          </td>
+          <td>
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;">
+              <i class="bi {{ platform_icons.get(r.platform, 'bi-database') }}"
+                 style="color:var(--accent);font-size:11px;"></i>
+              {{ src }}
+            </span>
+          </td>
+          <td class="text-end" style="font-variant-numeric:tabular-nums;">
+            {{ "{:,}".format(r.row_count) }}
+          </td>
+          <td class="text-end">{{ r.column_count }}</td>
+          <td class="text-muted" style="font-size:12px;">
+            {{ r.profiled_at[:16]|replace('T',' ') }}
+          </td>
+          <td class="text-end">
+            <a href="{{ url_for('report_page', db=r.database, schema=r.schema, table=r.table) }}"
+               class="btn btn-sm btn-outline-secondary">
+              <i class="bi bi-bar-chart-line"></i>
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-center py-5 text-muted">
+    <i class="bi bi-table" style="font-size:2.5rem;opacity:.4;"></i>
+    <p class="mt-3 mb-0">No profiles yet.</p>
+    <a href="{{ url_for('profile_page') }}" class="btn btn-primary btn-sm mt-3">
+      <i class="bi bi-play-circle me-1"></i> Profile your first table
+    </a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterSource(src, btn) {
+  document.querySelectorAll('.source-filter-btn').forEach(b => {
+    b.classList.remove('active-filter', 'btn-primary');
+    b.classList.add('btn-outline-secondary');
+  });
+  btn.classList.remove('btn-outline-secondary');
+  btn.classList.add('active-filter', 'btn-primary');
+
+  document.querySelectorAll('#profilesTable tbody tr').forEach(tr => {
+    tr.style.display = (!src || tr.dataset.source === src) ? '' : 'none';
+  });
+}
+</script>
+<style>
+  .active-filter { background:var(--accent) !important; border-color:var(--accent) !important; color:#000 !important; }
+</style>
+{% endblock %}

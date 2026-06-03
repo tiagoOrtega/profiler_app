@@ -1,0 +1,92 @@
+{
+  "database": "SAMPLE_DW",
+  "schema": "RETAIL",
+  "table": "FACT_SALES",
+  "last_tested": "2026-06-03T17:42:35.213278",
+  "relationships": [
+    {
+      "source_column": "DATE_KEY",
+      "target_db": "SAMPLE_DW",
+      "target_schema": "RETAIL",
+      "target_table": "DIM_DATE",
+      "target_column": "DATE_KEY",
+      "src_distinct": 730,
+      "tgt_distinct": 730,
+      "matched": 730,
+      "orphans": 0,
+      "match_pct": 1.0,
+      "status": "PASS",
+      "is_manual": false
+    },
+    {
+      "source_column": "CUSTOMER_KEY",
+      "target_db": "SAMPLE_DW",
+      "target_schema": "RETAIL",
+      "target_table": "DIM_CUSTOMER",
+      "target_column": "CUSTOMER_KEY",
+      "src_distinct": 500,
+      "tgt_distinct": 500,
+      "matched": 500,
+      "orphans": 0,
+      "match_pct": 1.0,
+      "status": "PASS",
+      "is_manual": false
+    },
+    {
+      "source_column": "PRODUCT_KEY",
+      "target_db": "SAMPLE_DW",
+      "target_schema": "RETAIL",
+      "target_table": "DIM_PRODUCT",
+      "target_column": "PRODUCT_KEY",
+      "src_distinct": 200,
+      "tgt_distinct": 200,
+      "matched": 200,
+      "orphans": 0,
+      "match_pct": 1.0,
+      "status": "PASS",
+      "is_manual": false
+    },
+    {
+      "source_column": "STORE_KEY",
+      "target_db": "SAMPLE_DW",
+      "target_schema": "RETAIL",
+      "target_table": "DIM_STORE",
+      "target_column": "STORE_KEY",
+      "src_distinct": 50,
+      "tgt_distinct": 50,
+      "matched": 50,
+      "orphans": 0,
+      "match_pct": 1.0,
+      "status": "PASS",
+      "is_manual": false
+    },
+    {
+      "source_column": "EMPLOYEE_KEY",
+      "target_db": "SAMPLE_DW",
+      "target_schema": "RETAIL",
+      "target_table": "DIM_EMPLOYEE",
+      "target_column": "EMPLOYEE_KEY",
+      "src_distinct": 100,
+      "tgt_distinct": 100,
+      "matched": 100,
+      "orphans": 0,
+      "match_pct": 1.0,
+      "status": "PASS",
+      "is_manual": false
+    },
+    {
+      "source_column": "PROMOTION_KEY",
+      "target_db": "SAMPLE_DW",
+      "target_schema": "RETAIL",
+      "target_table": "DIM_PROMOTION",
+      "target_column": "PROMOTION_KEY",
+      "src_distinct": 30,
+      "tgt_distinct": 30,
+      "matched": 30,
+      "orphans": 0,
+      "match_pct": 1.0,
+      "status": "PASS",
+      "is_manual": false
+    }
+  ]
+}

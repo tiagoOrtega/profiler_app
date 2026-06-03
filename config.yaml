@@ -1,0 +1,16 @@
+alerts:
+  log_file: profiler_alerts.log
+  null_rate_threshold: 0.1
+  row_count_change_threshold: 0.2
+  slack_webhook_url: null
+  std_dev_change_threshold: 0.3
+history_file: profiling_history.json
+output_dir: reports
+snowflake:
+  account: AFXNUJS-SG28711
+  database: SAMPLE_DW
+  password: _.2sc7cU7DtcwcY
+  role: ACCOUNTADMIN
+  schema: RETAIL
+  user: tiagoOrtega
+  warehouse: PROFILER_APP

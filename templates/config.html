@@ -1,0 +1,483 @@
+{% extends "base.html" %}
+{% block title %} — Sources{% endblock %}
+
+{% block content %}
+<style>
+  /* ── Source page styles ─────────────────────────────────────────────── */
+  .platform-tile {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 14px 10px; border: 1px solid var(--border2); border-radius: 8px;
+    cursor: pointer; transition: all .15s; user-select: none;
+    flex: 1; min-width: 110px;
+  }
+  .platform-tile:hover { border-color: var(--muted); background: var(--border2); }
+  .platform-tile.active {
+    border-color: var(--accent); background: rgba(88,166,255,.08);
+  }
+  .platform-tile.active i,
+  .platform-tile.active .pt-label { color: var(--accent) !important; }
+  .platform-tile i   { font-size: 1.5rem; margin-bottom: 6px; color: var(--muted); }
+  .pt-label          { font-size: 12px; font-weight: 600; color: var(--muted); }
+
+  .section-heading {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--muted); margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-heading::after {
+    content: ''; flex: 1; height: 1px; background: var(--border2);
+  }
+
+  .cred-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 640px) { .cred-grid { grid-template-columns: 1fr; } }
+
+  .field-wrap label { font-size: 11px; font-weight: 600; text-transform: uppercase;
+                      letter-spacing: .05em; color: var(--muted); display: block; margin-bottom: 5px; }
+  .field-wrap .hint { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+  .test-bar { display: flex; align-items: center; gap: 10px;
+              padding: 10px 0 2px; border-top: 1px solid var(--border2); margin-top: 4px; }
+
+  .threshold-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 700px) { .threshold-row { grid-template-columns: 1fr; } }
+
+  .progress-thin { height: 4px; background: var(--border2); border-radius: 2px; overflow: hidden; }
+  .progress-thin-fill { height: 4px; background: var(--green); border-radius: 2px; transition: width .3s; }
+</style>
+
+<!-- ── Page header ─────────────────────────────────────────────────────── -->
+<div class="d-flex align-items-start mb-4 gap-3 flex-wrap">
+  <div>
+    <h5 class="mb-1"><i class="bi bi-plug me-2"></i>Sources</h5>
+    <small class="text-muted">
+      Active source:
+      <span style="color:var(--text); font-weight:600;">{{ cfg.source_name or 'My Source' }}</span>
+      &nbsp;·&nbsp; <code>config.yaml</code> — env vars take precedence
+    </small>
+  </div>
+</div>
+
+<form method="POST">
+<div class="d-flex flex-column gap-4">
+
+  <!-- ── 1. Source Identity ────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-body" style="padding:20px 24px;">
+      <div class="section-heading"><i class="bi bi-tag me-1"></i>Source Identity</div>
+      <div class="cred-grid">
+        <div class="field-wrap" style="grid-column:1/-1;">
+          <label>Source Name</label>
+          <input type="text" name="source_name" class="form-control"
+                 value="{{ raw.get('source_name', cfg.source_name or 'My Source') }}"
+                 placeholder="e.g. Snowflake Production, Local SQLite, Databricks Dev">
+          <div class="hint">A friendly label shown on the dashboard and report pages to identify where data came from.</div>
+        </div>
+      </div>
+
+      <div class="section-heading mt-4"><i class="bi bi-server me-1"></i>Platform</div>
+      {% set cur_platform = raw.get('platform', 'snowflake') %}
+      <div class="d-flex gap-2 flex-wrap">
+        {% for pid, plabel, picon, pdesc in [
+            ('snowflake', 'Snowflake', 'bi-snow3',          'Cloud Data Warehouse'),
+            ('sqlite',    'SQLite',    'bi-file-earmark-zip','Local File Database'),
+            ('databricks','Databricks','bi-lightning-charge','Apache Spark SQL')
+        ] %}
+        <label style="flex:1; min-width:110px;">
+          <input type="radio" name="platform" value="{{ pid }}" class="d-none"
+                 {% if cur_platform == pid %}checked{% endif %}
+                 onchange="switchPlatform('{{ pid }}')">
+          <div class="platform-tile {% if cur_platform == pid %}active{% endif %}">
+            <i class="bi {{ picon }}"></i>
+            <div class="pt-label">{{ plabel }}</div>
+            <div style="font-size:10px; color:var(--muted); margin-top:2px;">{{ pdesc }}</div>
+          </div>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 2a. Snowflake credentials ─────────────────────────────────────── -->
+  <div class="card platform-section" id="sect-snowflake"
+       {% if cur_platform != 'snowflake' %}style="display:none"{% endif %}>
+    <div class="card-body" style="padding:20px 24px;">
+      <div class="section-heading"><i class="bi bi-snow3 me-1"></i>Snowflake Credentials</div>
+      <div class="cred-grid">
+        <div class="field-wrap">
+          <label>Account <code style="text-transform:none;font-size:10px;">SNOWFLAKE_ACCOUNT</code></label>
+          <input type="text" name="sf_account" class="form-control"
+                 value="{{ raw.get('snowflake', {}).get('account', '') }}"
+                 placeholder="abc12345.us-east-1">
+        </div>
+        <div class="field-wrap">
+          <label>Warehouse <code style="text-transform:none;font-size:10px;">SNOWFLAKE_WAREHOUSE</code></label>
+          <input type="text" name="sf_warehouse" class="form-control"
+                 value="{{ raw.get('snowflake', {}).get('warehouse', '') }}"
+                 placeholder="COMPUTE_WH">
+        </div>
+        <div class="field-wrap">
+          <label>User <code style="text-transform:none;font-size:10px;">SNOWFLAKE_USER</code></label>
+          <input type="text" name="sf_user" class="form-control"
+                 value="{{ raw.get('snowflake', {}).get('user', '') }}"
+                 placeholder="your_user">
+        </div>
+        <div class="field-wrap">
+          <label>Password <code style="text-transform:none;font-size:10px;">SNOWFLAKE_PASSWORD</code></label>
+          <input type="password" name="sf_password" class="form-control"
+                 value="{{ raw.get('snowflake', {}).get('password', '') }}"
+                 placeholder="••••••••">
+        </div>
+        <div class="field-wrap">
+          <label>Database <code style="text-transform:none;font-size:10px;">SNOWFLAKE_DATABASE</code></label>
+          <input type="text" name="sf_database" class="form-control"
+                 value="{{ raw.get('snowflake', {}).get('database', '') }}"
+                 placeholder="MY_DATABASE">
+        </div>
+        <div class="field-wrap">
+          <label>Schema <code style="text-transform:none;font-size:10px;">SNOWFLAKE_SCHEMA</code></label>
+          <input type="text" name="sf_schema" class="form-control"
+                 value="{{ raw.get('snowflake', {}).get('schema', '') }}"
+                 placeholder="PUBLIC">
+        </div>
+        <div class="field-wrap">
+          <label>Role <span style="font-weight:400;text-transform:none;font-size:11px;">(optional)</span>
+            <code style="text-transform:none;font-size:10px;">SNOWFLAKE_ROLE</code></label>
+          <input type="text" name="sf_role" class="form-control"
+                 value="{{ raw.get('snowflake', {}).get('role', '') or '' }}"
+                 placeholder="SYSADMIN">
+        </div>
+      </div>
+      <div class="test-bar">
+        <button type="button" id="testBtn" class="btn btn-sm btn-outline-secondary"
+                onclick="testConnection()">
+          <i class="bi bi-plug me-1"></i>Test Source
+        </button>
+        <span id="testResult" style="font-size:12px;"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 2b. SQLite credentials ────────────────────────────────────────── -->
+  <div class="card platform-section" id="sect-sqlite"
+       {% if cur_platform != 'sqlite' %}style="display:none"{% endif %}>
+    <div class="card-body" style="padding:20px 24px;">
+      <div class="section-heading"><i class="bi bi-file-earmark-zip me-1"></i>SQLite File</div>
+      <div class="field-wrap" style="max-width:520px;">
+        <label>Database File Path</label>
+        <input type="text" name="sqlite_db_path" class="form-control"
+               value="{{ raw.get('sqlite', {}).get('database_path', './sample.db') }}"
+               placeholder="./sample.db">
+        <div class="hint">Absolute or relative path to the <code>.db</code> file. The file is created automatically by the sample setup script if it doesn't exist.</div>
+      </div>
+      <div class="test-bar">
+        <button type="button" id="testBtn" class="btn btn-sm btn-outline-secondary"
+                onclick="testConnection()">
+          <i class="bi bi-plug me-1"></i>Test Source
+        </button>
+        <span id="testResult" style="font-size:12px;"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 2c. Databricks credentials ────────────────────────────────────── -->
+  <div class="card platform-section" id="sect-databricks"
+       {% if cur_platform != 'databricks' %}style="display:none"{% endif %}>
+    <div class="card-body" style="padding:20px 24px;">
+      <div class="section-heading"><i class="bi bi-lightning-charge me-1"></i>Databricks Credentials</div>
+      <div class="cred-grid">
+        <div class="field-wrap" style="grid-column:1/-1;">
+          <label>Server Hostname <code style="text-transform:none;font-size:10px;">DATABRICKS_HOST</code></label>
+          <input type="text" name="db_host" class="form-control"
+                 value="{{ raw.get('databricks', {}).get('host', '') }}"
+                 placeholder="adb-1234567890.12.azuredatabricks.net">
+        </div>
+        <div class="field-wrap" style="grid-column:1/-1;">
+          <label>HTTP Path <code style="text-transform:none;font-size:10px;">DATABRICKS_HTTP_PATH</code></label>
+          <input type="text" name="db_http_path" class="form-control"
+                 value="{{ raw.get('databricks', {}).get('http_path', '') }}"
+                 placeholder="/sql/1.0/warehouses/abcdef1234567890">
+        </div>
+        <div class="field-wrap" style="grid-column:1/-1;">
+          <label>Personal Access Token <code style="text-transform:none;font-size:10px;">DATABRICKS_TOKEN</code></label>
+          <input type="password" name="db_token" class="form-control"
+                 value="{{ raw.get('databricks', {}).get('token', '') }}"
+                 placeholder="dapi…">
+        </div>
+        <div class="field-wrap">
+          <label>Catalog <code style="text-transform:none;font-size:10px;">DATABRICKS_CATALOG</code></label>
+          <input type="text" name="db_catalog" class="form-control"
+                 value="{{ raw.get('databricks', {}).get('catalog', 'main') }}"
+                 placeholder="main">
+        </div>
+        <div class="field-wrap">
+          <label>Schema <code style="text-transform:none;font-size:10px;">DATABRICKS_SCHEMA</code></label>
+          <input type="text" name="db_schema" class="form-control"
+                 value="{{ raw.get('databricks', {}).get('schema', 'default') }}"
+                 placeholder="default">
+        </div>
+      </div>
+      <div class="test-bar">
+        <button type="button" id="testBtn" class="btn btn-sm btn-outline-secondary"
+                onclick="testConnection()">
+          <i class="bi bi-plug me-1"></i>Test Source
+        </button>
+        <span id="testResult" style="font-size:12px;"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 3. Alert thresholds ───────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-body" style="padding:20px 24px;">
+      <div class="section-heading"><i class="bi bi-bell me-1"></i>Alert Thresholds</div>
+      <div class="threshold-row">
+        <div class="field-wrap">
+          <label>Null Rate</label>
+          <div class="input-group">
+            <input type="number" name="alert_null_rate" class="form-control"
+                   value="{{ raw.get('alerts', {}).get('null_rate_threshold', 0.10) }}"
+                   step="0.01" min="0" max="1">
+            <span class="input-group-text">0–1</span>
+          </div>
+          <div class="hint">Alert when null% &gt; this (0.10 = 10%)</div>
+        </div>
+        <div class="field-wrap">
+          <label>Row Count Change</label>
+          <div class="input-group">
+            <input type="number" name="alert_row_count_change" class="form-control"
+                   value="{{ raw.get('alerts', {}).get('row_count_change_threshold', 0.20) }}"
+                   step="0.01" min="0" max="1">
+            <span class="input-group-text">0–1</span>
+          </div>
+          <div class="hint">Alert when rows shift &gt; this vs last run</div>
+        </div>
+        <div class="field-wrap">
+          <label>Std Dev Drift</label>
+          <div class="input-group">
+            <input type="number" name="alert_std_dev_change" class="form-control"
+                   value="{{ raw.get('alerts', {}).get('std_dev_change_threshold', 0.30) }}"
+                   step="0.01" min="0" max="1">
+            <span class="input-group-text">0–1</span>
+          </div>
+          <div class="hint">Alert when std dev shifts &gt; this vs last run</div>
+        </div>
+      </div>
+      <div class="cred-grid mt-3">
+        <div class="field-wrap">
+          <label>Slack Webhook <span style="font-weight:400;text-transform:none;">(optional)</span>
+            <code style="text-transform:none;font-size:10px;">SLACK_WEBHOOK_URL</code></label>
+          <input type="url" name="alert_slack_webhook" class="form-control"
+                 value="{{ raw.get('alerts', {}).get('slack_webhook_url', '') or '' }}"
+                 placeholder="https://hooks.slack.com/services/…">
+        </div>
+        <div class="field-wrap">
+          <label>Alert Log File</label>
+          <input type="text" name="alert_log_file" class="form-control"
+                 value="{{ raw.get('alerts', {}).get('log_file', 'profiler_alerts.log') }}">
+          <div class="hint">Leave empty to disable file logging</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 4. Storage ────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-body" style="padding:20px 24px;">
+      <div class="section-heading"><i class="bi bi-folder2 me-1"></i>Storage</div>
+      <div class="cred-grid">
+        <div class="field-wrap">
+          <label>Reports Directory</label>
+          <input type="text" name="output_dir" class="form-control"
+                 value="{{ raw.get('output_dir', 'reports') }}">
+          <div class="hint">Where profile JSON files are saved and read by the UI</div>
+        </div>
+        <div class="field-wrap">
+          <label>History File</label>
+          <input type="text" name="history_file" class="form-control"
+                 value="{{ raw.get('history_file', 'profiling_history.json') }}">
+          <div class="hint">JSON file used for drift detection across runs</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-check-lg me-1"></i>Save Source
+    </button>
+  </div>
+
+</div>
+</form>
+
+<!-- ── Sample Data Setup ─────────────────────────────────────────────── -->
+<div class="mt-4">
+  <div class="card">
+    <div class="card-body" style="padding:20px 24px;">
+      <div class="section-heading"><i class="bi bi-database-add me-1"></i>Sample Data Setup</div>
+
+      <div id="setup-desc-snowflake" class="setup-desc"
+           {% if cfg.platform != 'snowflake' %}style="display:none"{% endif %}>
+        <p style="font-size:12px; color:var(--muted); margin-bottom:14px;">
+          Runs <code>setup_snowflake.sql</code> — creates <code>SAMPLE_DW.RETAIL</code>
+          with 7 tables and ~11,600 rows of synthetic retail data.
+        </p>
+        <div class="d-flex gap-3 align-items-end flex-wrap">
+          <div class="field-wrap" style="min-width:200px;">
+            <label>Warehouse</label>
+            <input type="text" id="setupWarehouse" class="form-control"
+                   value="{{ cfg.snowflake.warehouse or 'COMPUTE_WH' }}"
+                   placeholder="COMPUTE_WH">
+          </div>
+          <button type="button" id="setupBtn" class="btn btn-outline-secondary mb-1"
+                  onclick="runSetup()">
+            <i class="bi bi-play-fill me-1"></i>Run Setup
+          </button>
+        </div>
+      </div>
+
+      <div id="setup-desc-sqlite" class="setup-desc"
+           {% if cfg.platform != 'sqlite' %}style="display:none"{% endif %}>
+        <p style="font-size:12px; color:var(--muted); margin-bottom:14px;">
+          Runs <code>setup_sqlite.py</code> — creates the 7-table retail schema
+          in the configured <code>.db</code> file.
+        </p>
+        <button type="button" id="setupBtn" class="btn btn-outline-secondary"
+                onclick="runSetup()">
+          <i class="bi bi-play-fill me-1"></i>Run Setup
+        </button>
+      </div>
+
+      <div id="setup-desc-databricks" class="setup-desc"
+           {% if cfg.platform != 'databricks' %}style="display:none"{% endif %}>
+        <p style="font-size:12px; color:var(--muted); margin-bottom:14px;">
+          Runs <code>setup_databricks.sql</code> — creates <code>main.retail</code>
+          with 7 tables using Spark SQL.
+        </p>
+        <button type="button" id="setupBtn" class="btn btn-outline-secondary"
+                onclick="runSetup()">
+          <i class="bi bi-play-fill me-1"></i>Run Setup
+        </button>
+      </div>
+
+      <!-- Progress -->
+      <div id="setupProgressWrap" class="mt-3" style="display:none;">
+        <div class="d-flex justify-content-between mb-1" style="font-size:12px;">
+          <span id="setupProgressLabel" class="text-muted">Initialising…</span>
+          <span id="setupProgressPct" style="color:var(--muted);">0%</span>
+        </div>
+        <div class="progress-thin">
+          <div id="setupProgressBar" class="progress-thin-fill" style="width:0%;"></div>
+        </div>
+        <div id="setupPreview" class="mt-2"
+             style="font-family:monospace; font-size:11px; color:var(--muted);
+                    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></div>
+      </div>
+
+      <div id="setupResult" class="mt-3" style="display:none;"></div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Test source ──────────────────────────────────────────────────────────────
+async function testConnection() {
+  const btns = document.querySelectorAll('#testBtn');
+  const res  = document.getElementById('testResult');
+  btns.forEach(b => { b.disabled = true; b.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>'; });
+  res.textContent = '';
+  try {
+    const d = await apiFetch('/api/test-connection', { method: 'POST' });
+    if (d.ok) {
+      res.innerHTML = `<span style="color:var(--green);"><i class="bi bi-check-circle me-1"></i>
+        Connected as <b>${d.user}</b>${d.database ? ` &rarr; <b>${d.database}</b>` : ''}</span>`;
+    } else {
+      res.innerHTML = `<span style="color:var(--red);"><i class="bi bi-x-circle me-1"></i>${d.error}</span>`;
+    }
+  } catch (e) {
+    res.innerHTML = `<span style="color:var(--red);"><i class="bi bi-x-circle me-1"></i>${e.message}</span>`;
+  }
+  btns.forEach(b => { b.disabled = false; b.innerHTML = '<i class="bi bi-plug me-1"></i>Test Source'; });
+}
+
+// ── Platform switcher ────────────────────────────────────────────────────────
+function switchPlatform(pid) {
+  document.querySelectorAll('.platform-tile').forEach(el => el.classList.remove('active'));
+  const radio = document.querySelector(`input[value="${pid}"]`);
+  if (radio) radio.closest('label').querySelector('.platform-tile').classList.add('active');
+  document.querySelectorAll('.platform-section').forEach(el => el.style.display = 'none');
+  const sect = document.getElementById(`sect-${pid}`);
+  if (sect) sect.style.display = '';
+  document.querySelectorAll('.setup-desc').forEach(el => el.style.display = 'none');
+  const desc = document.getElementById(`setup-desc-${pid}`);
+  if (desc) desc.style.display = '';
+}
+
+// ── Setup runner ─────────────────────────────────────────────────────────────
+async function runSetup() {
+  const whEl    = document.getElementById('setupWarehouse');
+  const warehouse = whEl ? whEl.value.trim() : 'COMPUTE_WH';
+  if (whEl && !warehouse) { alert('Enter a warehouse name first.'); return; }
+
+  const btn     = document.getElementById('setupBtn');
+  const wrap    = document.getElementById('setupProgressWrap');
+  const bar     = document.getElementById('setupProgressBar');
+  const label   = document.getElementById('setupProgressLabel');
+  const pct     = document.getElementById('setupProgressPct');
+  const preview = document.getElementById('setupPreview');
+  const result  = document.getElementById('setupResult');
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Running…';
+  wrap.style.display   = '';
+  result.style.display = 'none';
+  bar.style.width = '0%'; pct.textContent = '0%';
+  label.textContent = 'Starting…'; preview.textContent = '';
+
+  let jobId;
+  try {
+    const d = await apiFetch('/api/setup', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warehouse }),
+    });
+    jobId = d.job_id;
+  } catch (e) { _setupDone('error', e.message); return; }
+
+  const poll = setInterval(async () => {
+    try {
+      const job = await apiFetch(`/api/setup/${jobId}`);
+      const done  = job.current || 0;
+      const total = job.total   || 1;
+      const p = Math.round(done / total * 100);
+      bar.style.width = p + '%'; pct.textContent = p + '%';
+      label.textContent = `Step ${done} of ${total}`;
+      if (job.preview) preview.textContent = job.preview;
+      if (job.status === 'done') {
+        clearInterval(poll);
+        bar.style.width = '100%'; pct.textContent = '100%';
+        label.textContent = 'Complete';
+        _setupDone('success',
+          `Sample data ready. &nbsp;<a href="/">Dashboard →</a>
+           &nbsp;<a href="/profile">Profile a table →</a>`);
+      } else if (job.status === 'error') {
+        clearInterval(poll);
+        _setupDone('error', job.error || 'Unknown error');
+      }
+    } catch (e) { clearInterval(poll); _setupDone('error', e.message); }
+  }, 1200);
+}
+
+function _setupDone(type, html) {
+  const btn    = document.getElementById('setupBtn');
+  const result = document.getElementById('setupResult');
+  btn.disabled = false;
+  btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run Setup';
+  result.innerHTML = `<div class="alert alert-${type==='error'?'danger':'success'} py-2 mb-0">
+    <i class="bi bi-${type==='error'?'x-octagon':'check-circle'} me-1"></i>${html}</div>`;
+  result.style.display = '';
+}
+</script>
+{% endblock %}

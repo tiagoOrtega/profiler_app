@@ -1,0 +1,18 @@
+snowflake:
+  account: your_account.region        # e.g. abc12345.us-east-1
+  user: your_user
+  password: your_password             # prefer env var SNOWFLAKE_PASSWORD
+  warehouse: COMPUTE_WH
+  database: MY_DATABASE
+  schema: PUBLIC
+  role: SYSADMIN                      # optional
+
+alerts:
+  slack_webhook_url: ""               # set here or via SLACK_WEBHOOK_URL env var
+  log_file: profiler_alerts.log
+  null_rate_threshold: 0.10           # alert when null% > 10%
+  row_count_change_threshold: 0.20    # alert when row count shifts > 20%
+  std_dev_change_threshold: 0.30      # alert when std dev shifts > 30% vs previous run
+
+output_dir: reports
+history_file: profiling_history.json

@@ -1,0 +1,908 @@
+{% extends "base.html" %}
+{% block title %} — {{ profile.table }}{% endblock %}
+
+{% block content %}
+<style>
+  /* ── Tab overrides ────────────────────────────────────────────────── */
+  .rpt-tabs { border-bottom: 1px solid var(--border2); margin-bottom: 0; }
+  .rpt-tabs .nav-link {
+    color: var(--muted); border: none; border-bottom: 2px solid transparent;
+    padding: 8px 14px; font-size: 12px; font-weight: 500; border-radius: 0;
+    background: none; transition: color .15s;
+  }
+  .rpt-tabs .nav-link:hover { color: var(--text); }
+  .rpt-tabs .nav-link.active {
+    color: var(--text); border-bottom-color: var(--accent);
+    background: none;
+  }
+  .tab-content { padding-top: 20px; }
+
+  /* ── Stat strip ───────────────────────────────────────────────────── */
+  .stat-strip { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 0; }
+  .stat-strip-item { display: flex; flex-direction: column; }
+  .stat-strip-item .sv { font-size: 22px; font-weight: 700; line-height: 1; }
+  .stat-strip-item .sl { font-size: 10px; color: var(--muted); text-transform: uppercase;
+                         letter-spacing: .06em; margin-top: 3px; }
+
+  /* ── Column cards ─────────────────────────────────────────────────── */
+  .col-card {
+    border: 1px solid var(--border2); border-radius: 7px;
+    overflow: hidden; background: var(--bg2);
+    display: flex; flex-direction: column;
+  }
+  .col-card-head {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 12px; background: var(--bg3);
+    border-bottom: 1px solid var(--border2);
+  }
+  .col-card-name { font-size: 12px; font-weight: 600; color: var(--text); font-family: monospace; }
+  .col-card-type {
+    font-size: 10px; color: var(--muted); background: var(--border2);
+    padding: 1px 6px; border-radius: 3px; white-space: nowrap;
+  }
+  .col-card-comment {
+    font-size: 11px; color: var(--muted); padding: 5px 12px;
+    border-bottom: 1px solid var(--border2); line-height: 1.5;
+  }
+  .col-card-stats {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+    padding: 8px 12px 10px; font-size: 12px;
+  }
+  .col-stat { margin-bottom: 5px; }
+  .col-stat dt { font-size: 10px; color: var(--muted); text-transform: uppercase;
+                 letter-spacing: .04em; margin-bottom: 1px; }
+  .col-stat dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .col-card-divider { height: 1px; background: var(--border2); margin: 2px 12px 6px; }
+  .null-bar-wrap { height: 2px; background: var(--border2); margin-top: auto; }
+  .null-bar-fill { height: 2px; }
+
+  /* ── Rel flat table ───────────────────────────────────────────────── */
+  .rel-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .rel-table th { padding: 5px 10px; color: var(--muted); font-size: 10px;
+                  text-transform: uppercase; letter-spacing: .05em;
+                  border-bottom: 1px solid var(--border2); font-weight: 600; }
+  .rel-table td { padding: 6px 10px; border-bottom: 1px solid var(--border2); vertical-align: middle; }
+  .rel-table tr:last-child td { border-bottom: none; }
+  .rel-group-row td { padding: 4px 10px 2px; font-size: 10px; color: var(--muted);
+                      text-transform: uppercase; letter-spacing: .05em;
+                      background: var(--bg3); border-bottom: 1px solid var(--border2); }
+
+  /* ── Empty state ──────────────────────────────────────────────────── */
+  .empty-state { text-align: center; padding: 40px 20px; color: var(--muted); }
+  .empty-state i { font-size: 2rem; opacity: .3; display: block; margin-bottom: 10px; }
+  .empty-state p { font-size: 13px; margin: 0; }
+</style>
+
+<!-- ── Compact header ─────────────────────────────────────────────────────── -->
+<div class="d-flex align-items-start gap-3 mb-4 flex-wrap">
+  <div style="min-width:0; flex:1;">
+    <div class="d-flex align-items-baseline gap-2 flex-wrap">
+      <h5 class="mb-0" style="font-size:16px;">{{ profile.table }}</h5>
+      <span style="font-size:12px; color:var(--muted);">
+        <code>{{ profile.database }}.{{ profile.schema }}</code>
+        &nbsp;·&nbsp;{{ profile.profiled_at[:10] }}
+      </span>
+    </div>
+    <!-- Source badge -->
+    {% set _picons = {'snowflake':'bi-snow3','sqlite':'bi-file-earmark-zip','databricks':'bi-lightning-charge'} %}
+    <div class="mt-1 d-flex align-items-center gap-2 flex-wrap" style="font-size:12px;">
+      <span style="display:inline-flex;align-items:center;gap:4px;
+                   background:var(--border2);border-radius:4px;padding:1px 8px;">
+        <i class="bi {{ _picons.get(profile.platform, 'bi-database') }}"
+           style="color:var(--accent);"></i>
+        <span style="color:var(--text);font-weight:500;">
+          {{ profile.source_name or profile.platform or 'Unknown source' }}
+        </span>
+      </span>
+    </div>
+    {% if profile.comment %}
+    <p class="mt-1 mb-0" style="font-size:12px; color:var(--muted); line-height:1.55; max-width:700px;">
+      <i class="bi bi-chat-square-text me-1" style="opacity:.5;"></i>{{ profile.comment }}
+    </p>
+    {% endif %}
+  </div>
+  <div class="d-flex gap-2 flex-shrink-0">
+    <a href="{{ url_for('profile_page') }}?db={{ profile.database }}&schema={{ profile.schema }}&table={{ profile.table }}"
+       class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-arrow-repeat me-1"></i>Re-profile
+    </a>
+    <a href="{{ url_for('index') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-arrow-left me-1"></i>Dashboard
+    </a>
+  </div>
+</div>
+
+<!-- ── Tab nav ────────────────────────────────────────────────────────────── -->
+<ul class="nav rpt-tabs" id="reportTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#pane-overview"
+            type="button" role="tab">Overview</button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#pane-columns"
+            type="button" role="tab">
+      Columns
+      <span id="colTabBadge" class="badge ms-1"
+            style="background:var(--border2);color:var(--muted);font-size:10px;">
+        {{ profile.column_count }}
+      </span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#pane-rel"
+            type="button" role="tab" id="relTabBtn">
+      Relationships
+      <span id="relTabBadge" style="display:none;" class="badge ms-1"
+            style="font-size:10px;"></span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#pane-corr"
+            type="button" role="tab" id="corrTabBtn">
+      Correlation
+      <span id="corrTabBadge" style="display:none;" class="badge ms-1 bg-secondary"
+            style="font-size:10px;"></span>
+    </button>
+  </li>
+</ul>
+
+<!-- ── Tab panes ─────────────────────────────────────────────────────────── -->
+<div class="tab-content" id="reportTabContent">
+
+  <!-- ══ OVERVIEW ══ -->
+  <div class="tab-pane fade show active" id="pane-overview" role="tabpanel">
+
+    <!-- Stat strip -->
+    <div class="stat-strip mb-4">
+      <div class="stat-strip-item">
+        <span class="sv" style="color:var(--accent);">{{ "{:,}".format(profile.row_count) }}</span>
+        <span class="sl">Rows</span>
+      </div>
+      <div class="stat-strip-item">
+        <span class="sv" style="color:var(--yellow);">{{ profile.column_count }}</span>
+        <span class="sl">Columns</span>
+      </div>
+      <div class="stat-strip-item">
+        <span class="sv" style="color:{% if null_col_count > 0 %}var(--red){% else %}var(--green){% endif %};">
+          {{ null_col_count }}
+        </span>
+        <span class="sl">Cols w/ Nulls</span>
+      </div>
+      <div class="stat-strip-item">
+        <span class="sv" style="color:var(--purple);">{{ numeric_count }}</span>
+        <span class="sl">Numeric Cols</span>
+      </div>
+      <div class="stat-strip-item">
+        <span class="sv" style="color:var(--muted);">{{ alert_col_count }}</span>
+        <span class="sl">Alert Cols</span>
+      </div>
+      {% if error_col_count > 0 %}
+      <div class="stat-strip-item">
+        <span class="sv" style="color:var(--red);">{{ error_col_count }}</span>
+        <span class="sl">Errors</span>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Charts -->
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header"><i class="bi bi-bar-chart-line me-1"></i>Null Rate</div>
+          <div class="card-body" style="position:relative; height:{{ chart_height }}px;">
+            <canvas id="chartNull"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header"><i class="bi bi-fingerprint me-1"></i>Uniqueness</div>
+          <div class="card-body" style="position:relative; height:{{ chart_height }}px;">
+            <canvas id="chartUniq"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ COLUMNS ══ -->
+  <div class="tab-pane fade" id="pane-columns" role="tabpanel">
+
+    <!-- Toolbar -->
+    <div class="d-flex align-items-center mb-3">
+      <span id="colCountBadge" style="font-size:12px; color:var(--muted);">
+        {{ profile.column_count }} columns
+      </span>
+      <div class="ms-auto">
+        <button id="alertFilterBtn" type="button"
+                class="btn btn-sm btn-outline-secondary"
+                onclick="toggleAlertFilter()"
+                {% if alert_col_count == 0 %}disabled{% endif %}>
+          <i class="bi bi-funnel me-1"></i>Alerts only
+          <span class="badge ms-1"
+                style="background:{% if alert_col_count > 0 %}var(--yellow);color:#000{% else %}var(--border2);color:var(--muted){% endif %};">
+            {{ alert_col_count }}
+          </span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Column grid -->
+    <div class="row g-2" id="colGrid">
+    {% for col in profile.columns %}
+    <div class="col-md-6 col-xl-4"
+         data-alert="{{ '1' if col.null_rate > 0.1 else '0' }}"
+         data-col-name="{{ col.name }}">
+      <div class="col-card h-100">
+
+        <!-- Head -->
+        <div class="col-card-head">
+          <span class="col-card-name">{{ col.name }}</span>
+          <span class="col-card-type">{{ col.data_type }}</span>
+          <div class="ms-auto">
+            {% if col.null_rate > 0.5 %}
+              <span class="badge" style="background:var(--red);font-size:10px;">
+                {{ "%.0f"|format(col.null_rate * 100) }}% null
+              </span>
+            {% elif col.null_rate > 0.1 %}
+              <span class="badge" style="background:var(--yellow);color:#000;font-size:10px;">
+                {{ "%.1f"|format(col.null_rate * 100) }}% null
+              </span>
+            {% elif col.null_rate > 0 %}
+              <span class="badge bg-secondary" style="font-size:10px;">
+                {{ "%.1f"|format(col.null_rate * 100) }}% null
+              </span>
+            {% else %}
+              <span class="badge" style="background:var(--green);font-size:10px;">no nulls</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Comment -->
+        {% if col.comment %}
+        <div class="col-card-comment">
+          <i class="bi bi-chat-square-text me-1" style="opacity:.45;"></i>{{ col.comment }}
+        </div>
+        {% endif %}
+
+        <!-- Profiling error banner -->
+        {% if col.error %}
+        <div class="col-card-comment" style="color:var(--red); background:#2d1215; border-color:#da363340;">
+          <i class="bi bi-exclamation-triangle me-1"></i>{{ col.error }}
+        </div>
+        {% endif %}
+
+        <!-- Stats -->
+        <div class="col-card-stats">
+          <dl class="col-stat">
+            <dt>Nulls</dt>
+            <dd>{{ "{:,}".format(col.null_count) }}
+              <small style="color:var(--muted);">({{ "%.2f"|format(col.null_rate * 100) }}%)</small>
+            </dd>
+          </dl>
+          <dl class="col-stat">
+            <dt>Distinct</dt>
+            <dd>{{ "{:,}".format(col.distinct_count) }}
+              <small style="color:var(--muted);">/ {{ "%.0f"|format(col.uniqueness_rate * 100) }}%</small>
+            </dd>
+          </dl>
+
+          {% if col.mean is not none %}
+          <div class="col-card-divider" style="grid-column:1/-1;"></div>
+          <dl class="col-stat">
+            <dt>Min / Max</dt>
+            <dd>{{ col.min_val }} <span style="color:var(--muted);">/</span> {{ col.max_val }}</dd>
+          </dl>
+          <dl class="col-stat">
+            <dt>Mean / Median</dt>
+            <dd>{{ "%.4g"|format(col.mean) }}
+              <span style="color:var(--muted);">/ {{ col.median if col.median is not none else '—' }}</span>
+            </dd>
+          </dl>
+          <dl class="col-stat">
+            <dt>Std Dev</dt>
+            <dd>{% if col.std_dev is not none %}{{ "%.4g"|format(col.std_dev) }}{% else %}—{% endif %}</dd>
+          </dl>
+          <dl class="col-stat">
+            <dt>Q1 / Q3</dt>
+            <dd>{{ col.q1 if col.q1 is not none else '—' }}
+              <span style="color:var(--muted);">/</span>
+              {{ col.q3 if col.q3 is not none else '—' }}
+            </dd>
+          </dl>
+          <dl class="col-stat">
+            <dt>Skewness</dt>
+            <dd>{% if col.skewness is not none %}{{ "%.3g"|format(col.skewness) }}{% else %}—{% endif %}</dd>
+          </dl>
+          <dl class="col-stat">
+            <dt>Kurtosis</dt>
+            <dd>{% if col.kurtosis is not none %}{{ "%.3g"|format(col.kurtosis) }}{% else %}—{% endif %}</dd>
+          </dl>
+
+          {% elif col.avg_length is not none %}
+          <div class="col-card-divider" style="grid-column:1/-1;"></div>
+          <dl class="col-stat">
+            <dt>Min / Max Len</dt>
+            <dd>{{ col.min_length }} <span style="color:var(--muted);">/</span> {{ col.max_length }}</dd>
+          </dl>
+          <dl class="col-stat">
+            <dt>Avg Length</dt>
+            <dd>{{ "%.1f"|format(col.avg_length) }}</dd>
+          </dl>
+
+          {% elif col.min_date is not none %}
+          <div class="col-card-divider" style="grid-column:1/-1;"></div>
+          <dl class="col-stat">
+            <dt>From</dt>
+            <dd style="font-size:11px;">{{ col.min_date }}</dd>
+          </dl>
+          <dl class="col-stat">
+            <dt>To</dt>
+            <dd style="font-size:11px;">{{ col.max_date }}</dd>
+          </dl>
+          {% endif %}
+        </div>
+
+        <!-- Null fill bar -->
+        <div class="null-bar-wrap">
+          <div class="null-bar-fill" style="
+            width:{{ "%.2f"|format(col.null_rate * 100) }}%;
+            background:{% if col.null_rate > 0.5 %}var(--red){% elif col.null_rate > 0.1 %}var(--yellow){% elif col.null_rate > 0 %}#6e7681{% else %}transparent{% endif %};
+          "></div>
+        </div>
+
+      </div>
+    </div>
+    {% endfor %}
+    </div>
+  </div>
+
+  <!-- ══ RELATIONSHIPS ══ -->
+  <div class="tab-pane fade" id="pane-rel" role="tabpanel">
+
+    <div class="d-flex align-items-center gap-2 mb-3">
+      <button id="relTestBtn" type="button" class="btn btn-sm btn-outline-secondary"
+              onclick="runRelTests()">
+        <i class="bi bi-diagram-3 me-1"></i>Run Tests
+      </button>
+      <button type="button" class="btn btn-sm btn-outline-secondary"
+              data-bs-toggle="modal" data-bs-target="#manualRelModal">
+        <i class="bi bi-pencil-square me-1"></i>Add Manual
+      </button>
+      <span id="relMeta" style="font-size:11px; color:var(--muted); margin-left:4px;"></span>
+    </div>
+
+    <div id="relContent">
+      <div class="empty-state">
+        <i class="bi bi-diagram-3"></i>
+        <p>Click <b>Run Tests</b> to detect FK-like column references across profiled tables.<br>
+        <small>Compares same-named columns using Snowflake EXCEPT queries.</small></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ CORRELATION ══ -->
+  <div class="tab-pane fade" id="pane-corr" role="tabpanel">
+
+    <div class="d-flex align-items-center gap-2 mb-3">
+      <button id="corrBtn" type="button" class="btn btn-sm btn-outline-secondary"
+              onclick="runCorrelation()">
+        <i class="bi bi-grid-3x3 me-1"></i>Run Correlation
+      </button>
+      <span id="corrMeta" style="font-size:11px; color:var(--muted); margin-left:4px;"></span>
+    </div>
+
+    <div id="corrBody">
+      <div class="empty-state">
+        <i class="bi bi-grid-3x3"></i>
+        <p>Click <b>Run Correlation</b> to compute Pearson coefficients for all numeric columns.<br>
+        <small>Runs a single query in Snowflake — no data leaves the warehouse.</small></p>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /tab-content -->
+
+<!-- ── Manual Relationship Modal ──────────────────────────────────────────── -->
+<div class="modal fade" id="manualRelModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content" style="background:var(--bg2); border-color:var(--border);">
+      <div class="modal-header" style="border-color:var(--border);">
+        <h6 class="modal-title mb-0">
+          <i class="bi bi-pencil-square me-1"></i>Add Manual Relationship
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"
+                style="filter:invert(1);opacity:.5;"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3" style="font-size:13px;">
+          <div class="col-12">
+            <label class="form-label">Source Column</label>
+            <select id="mRelSrcCol" class="form-select">
+              {% for col in profile.columns %}
+              <option value="{{ col.name }}">{{ col.name }} ({{ col.data_type }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Target Database</label>
+            <input id="mRelTgtDb" class="form-control" value="{{ profile.database }}">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Target Schema</label>
+            <input id="mRelTgtSchema" class="form-control" value="{{ profile.schema }}">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Target Table <span style="color:var(--red);">*</span></label>
+            <input id="mRelTgtTable" class="form-control" placeholder="MY_TABLE">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Target Column <span style="color:var(--red);">*</span></label>
+            <input id="mRelTgtCol" class="form-control" placeholder="MY_COLUMN">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Status</label>
+            <select id="mRelStatus" class="form-select">
+              <option value="MANUAL">MANUAL — manually documented</option>
+              <option value="PASS">PASS — confirmed FK relationship</option>
+              <option value="WARN">WARN — partial / approximate match</option>
+              <option value="FAIL">FAIL — known data quality issue</option>
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Note <small class="text-muted">(optional)</small></label>
+            <input id="mRelNote" class="form-control"
+                   placeholder="Business context, source of truth, known exceptions…">
+          </div>
+        </div>
+        <div id="mRelError" class="alert alert-danger mt-3 d-none py-2 mb-0"
+             style="font-size:12px;"></div>
+      </div>
+      <div class="modal-footer" style="border-color:var(--border);">
+        <button type="button" class="btn btn-sm btn-outline-secondary"
+                data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-sm btn-primary" onclick="submitManualRel()">
+          <i class="bi bi-plus-circle me-1"></i>Save Relationship
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const REL_DB     = '{{ profile.database }}';
+const REL_SCHEMA = '{{ profile.schema }}';
+const REL_TABLE  = '{{ profile.table }}';
+const TOTAL_COLS = {{ profile.column_count }};
+const ALERT_COLS = {{ alert_col_count }};
+
+// ── Overview charts ───────────────────────────────────────────────────────────
+
+const CHART_SCALE = {
+  x: { grid: { color: '#21262d' }, ticks: { color: '#8b949e', font: { size: 11 } } },
+  y: { grid: { color: '#21262d' }, ticks: { color: '#e6edf3', font: { size: 11 } } },
+};
+
+const colData    = {{ profile.columns | tojson }};
+const labels     = colData.map(c => c.name);
+const nullRates  = colData.map(c => +(c.null_rate  * 100).toFixed(2));
+const uniqRates  = colData.map(c => +(c.uniqueness_rate * 100).toFixed(2));
+
+new Chart(document.getElementById('chartNull'), {
+  type: 'bar',
+  data: { labels, datasets: [{
+    data: nullRates,
+    backgroundColor: nullRates.map(v =>
+      v > 50 ? '#f85149' : v > 10 ? '#d29922' : v > 0 ? '#6e7681' : '#238636'),
+    borderRadius: 3,
+  }]},
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false },
+               tooltip: { callbacks: { label: c => ` ${c.parsed.x.toFixed(2)}%` } } },
+    indexAxis: 'y',
+    scales: { x: { ...CHART_SCALE.x, min: 0, max: 100,
+                   title: { display: true, text: 'Null %', color: '#8b949e', font: { size: 11 } } },
+              y: CHART_SCALE.y },
+  },
+});
+
+new Chart(document.getElementById('chartUniq'), {
+  type: 'bar',
+  data: { labels, datasets: [{
+    data: uniqRates, backgroundColor: '#58a6ff', borderRadius: 3,
+  }]},
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false },
+               tooltip: { callbacks: { label: c => ` ${c.parsed.x.toFixed(2)}%` } } },
+    indexAxis: 'y',
+    scales: { x: { ...CHART_SCALE.x, min: 0, max: 100,
+                   title: { display: true, text: 'Uniqueness %', color: '#8b949e', font: { size: 11 } } },
+              y: CHART_SCALE.y },
+  },
+});
+
+// ── Auto-load saved results on page ready ─────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  Promise.allSettled([
+    apiFetch(`/api/rel/saved?db=${REL_DB}&schema=${REL_SCHEMA}&table=${REL_TABLE}`)
+      .then(data => {
+        if (data.relationships && data.relationships.length)
+          _applyRelData(data);
+      }),
+    apiFetch(`/api/correlation/saved?db=${REL_DB}&schema=${REL_SCHEMA}&table=${REL_TABLE}`)
+      .then(corr => {
+        if (corr.columns && corr.columns.length)
+          _applyCorrData(corr);
+      }),
+  ]);
+});
+
+// ── Alert filter (Columns tab) ────────────────────────────────────────────────
+
+let _alertOnly = false;
+
+function toggleAlertFilter() {
+  _alertOnly = !_alertOnly;
+  const btn   = document.getElementById('alertFilterBtn');
+  const badge = document.getElementById('colCountBadge');
+  const cards = document.querySelectorAll('#colGrid [data-alert]');
+  let shown = 0;
+
+  cards.forEach(el => {
+    const hide = _alertOnly && el.dataset.alert !== '1';
+    el.style.display = hide ? 'none' : '';
+    if (!hide) shown++;
+  });
+
+  btn.style.cssText = _alertOnly
+    ? 'background:var(--yellow);color:#000;border-color:var(--yellow);'
+    : '';
+  badge.textContent = _alertOnly
+    ? `${shown} / ${TOTAL_COLS} columns`
+    : `${TOTAL_COLS} columns`;
+
+  let empty = document.getElementById('alertEmptyState');
+  if (_alertOnly && shown === 0) {
+    if (!empty) {
+      empty = document.createElement('div');
+      empty.id = 'alertEmptyState'; empty.className = 'col-12';
+      empty.innerHTML = '<div class="empty-state"><i class="bi bi-check-circle" style="color:var(--green);"></i><p>No columns exceed the alert threshold (null rate &gt; 10%).</p></div>';
+      document.getElementById('colGrid').appendChild(empty);
+    }
+  } else if (empty) { empty.remove(); }
+}
+
+// ── Relationship tests ────────────────────────────────────────────────────────
+
+function _applyRelData(data) {
+  renderRelResults(data.relationships || []);
+  // Update tab badge and button
+  const rels = data.relationships || [];
+  const pass = rels.filter(r => r.status === 'PASS').length;
+  const warn = rels.filter(r => r.status === 'WARN').length;
+  const date = (data.last_tested || '').slice(0, 10);
+
+  const btn = document.getElementById('relTestBtn');
+  btn.disabled = false;
+  btn.innerHTML =
+    `<i class="bi bi-arrow-repeat me-1"></i>Re-run` +
+    (pass ? ` <span class="badge ms-1" style="background:var(--green);">${pass}P</span>` : '') +
+    (warn ? ` <span class="badge ms-1" style="background:var(--yellow);color:#000;">${warn}W</span>` : '');
+
+  const meta = document.getElementById('relMeta');
+  meta.textContent = date ? `Last run ${date} · ${rels.length} result${rels.length !== 1 ? 's' : ''}` : '';
+
+  const badge = document.getElementById('relTabBadge');
+  if (rels.length) {
+    badge.textContent = rels.length;
+    badge.style.display = '';
+    badge.style.background = pass === rels.filter(r => !r.is_manual).length
+      ? 'var(--green)' : 'var(--border2)';
+    badge.style.color = 'var(--text)';
+  }
+}
+
+async function runRelTests() {
+  const btn = document.getElementById('relTestBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Running…';
+  document.getElementById('relContent').innerHTML =
+    '<div class="empty-state"><div class="spinner-border text-primary mb-2"></div><p>Querying Snowflake…</p></div>';
+
+  let jobId;
+  try {
+    const d = await apiFetch('/api/relationships', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ database: REL_DB, schema: REL_SCHEMA, table: REL_TABLE }),
+    });
+    jobId = d.job_id;
+  } catch (e) {
+    document.getElementById('relContent').innerHTML =
+      `<div class="alert alert-danger">${e.message}</div>`;
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-diagram-3 me-1"></i>Run Tests';
+    return;
+  }
+
+  const poll = setInterval(async () => {
+    try {
+      const job = await apiFetch(`/api/relationships/${jobId}`);
+      if (job.status === 'done') { clearInterval(poll); _applyRelData(job); }
+      else if (job.status === 'error') {
+        clearInterval(poll);
+        document.getElementById('relContent').innerHTML =
+          `<div class="alert alert-danger">${job.error}</div>`;
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-diagram-3 me-1"></i>Run Tests';
+      }
+    } catch (e) {
+      clearInterval(poll);
+      btn.disabled = false;
+    }
+  }, 1500);
+}
+
+async function deleteRelEntry(idx) {
+  if (!confirm('Remove this relationship?')) return;
+  try {
+    const data = await apiFetch(
+      `/api/rel/entry?db=${REL_DB}&schema=${REL_SCHEMA}&table=${REL_TABLE}&idx=${idx}`,
+      { method: 'DELETE' }
+    );
+    _applyRelData(data);
+  } catch (e) { alert('Delete failed: ' + e.message); }
+}
+
+async function submitManualRel() {
+  const errEl = document.getElementById('mRelError');
+  errEl.classList.add('d-none');
+  const tgtTable = document.getElementById('mRelTgtTable').value.trim();
+  const tgtCol   = document.getElementById('mRelTgtCol').value.trim();
+  if (!tgtTable || !tgtCol) {
+    errEl.textContent = 'Target table and column are required.';
+    errEl.classList.remove('d-none');
+    return;
+  }
+  try {
+    const data = await apiFetch('/api/rel/manual', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        database: REL_DB, schema: REL_SCHEMA, table: REL_TABLE,
+        entry: {
+          source_column: document.getElementById('mRelSrcCol').value,
+          target_db:     document.getElementById('mRelTgtDb').value.trim(),
+          target_schema: document.getElementById('mRelTgtSchema').value.trim(),
+          target_table:  tgtTable, target_column: tgtCol,
+          status:        document.getElementById('mRelStatus').value,
+          note:          document.getElementById('mRelNote').value.trim(),
+        },
+      }),
+    });
+    bootstrap.Modal.getInstance(document.getElementById('manualRelModal')).hide();
+    ['mRelTgtTable','mRelTgtCol','mRelNote'].forEach(id =>
+      document.getElementById(id).value = '');
+    _applyRelData(data);
+    // Switch to Relationships tab
+    bootstrap.Tab.getOrCreateInstance(
+      document.querySelector('[data-bs-target="#pane-rel"]')).show();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.classList.remove('d-none');
+  }
+}
+
+function renderRelResults(allResults) {
+  const el = document.getElementById('relContent');
+
+  if (!allResults.length) {
+    el.innerHTML = '<div class="empty-state"><i class="bi bi-diagram-3"></i><p>No results yet. Run the test above.</p></div>';
+    return;
+  }
+
+  // Sort: PASS → WARN → FAIL → MANUAL, then by source column
+  const ORDER = { PASS: 0, WARN: 1, FAIL: 2, MANUAL: 3 };
+  const sorted = [...allResults].map((r, idx) => ({ r, idx }))
+    .sort((a, b) =>
+      (ORDER[a.r.status] ?? 4) - (ORDER[b.r.status] ?? 4) ||
+      a.r.source_column.localeCompare(b.r.source_column) ||
+      (b.r.match_pct ?? -1) - (a.r.match_pct ?? -1)
+    );
+
+  let rows = '';
+  let lastCol = null;
+
+  sorted.forEach(({ r, idx }) => {
+    if (r.source_column !== lastCol) {
+      lastCol = r.source_column;
+      rows += `<tr class="rel-group-row">
+        <td colspan="6"><code>${r.source_column}</code></td>
+      </tr>`;
+    }
+
+    const isManual = r.is_manual || r.status === 'MANUAL';
+    const color =
+      r.status === 'PASS' ? 'var(--green)'
+      : r.status === 'WARN' ? 'var(--yellow)'
+      : r.status === 'FAIL' ? 'var(--red)'
+      : 'var(--accent)';
+    const tc = r.status === 'WARN' ? 'color:#000;' : '';
+
+    const statusBadge = `<span class="badge" style="background:${color};${tc}font-size:10px;">${r.status}</span>`;
+    const target = `<code style="font-size:11px;">${r.target_table}.${r.target_column}</code>`;
+    const delBtn = `<button onclick="deleteRelEntry(${idx})" title="Remove"
+      style="background:none;border:none;padding:2px 4px;cursor:pointer;color:var(--muted);">
+      <i class="bi bi-x-circle"></i></button>`;
+
+    if (isManual) {
+      rows += `<tr>
+        <td>${statusBadge}</td>
+        <td>${target}</td>
+        <td colspan="3" style="color:var(--muted);font-style:italic;font-size:11px;">
+          ${r.note || 'manually defined'}
+        </td>
+        <td>${delBtn}</td>
+      </tr>`;
+    } else {
+      const pct = (r.match_pct * 100).toFixed(1);
+      const bar = `<div style="display:flex;align-items:center;gap:6px;">
+        <div style="flex:1;height:3px;background:var(--border2);border-radius:2px;min-width:50px;">
+          <div style="width:${pct}%;height:3px;background:${color};border-radius:2px;"></div>
+        </div>
+        <span style="color:${color};font-weight:600;font-size:11px;width:40px;text-align:right;">${pct}%</span>
+      </div>`;
+      const orphanCell = r.orphans > 0
+        ? `<span style="color:var(--red);">${r.orphans.toLocaleString()}</span>`
+        : `<span style="color:var(--muted);">—</span>`;
+      rows += `<tr>
+        <td>${statusBadge}</td>
+        <td>${target}</td>
+        <td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">
+          ${r.matched.toLocaleString()} / ${r.src_distinct.toLocaleString()}
+        </td>
+        <td style="min-width:120px;">${bar}</td>
+        <td style="text-align:right;">${orphanCell}</td>
+        <td>${delBtn}</td>
+      </tr>`;
+    }
+  });
+
+  el.innerHTML = `
+    <div style="overflow-x:auto; border:1px solid var(--border2); border-radius:6px;">
+      <table class="rel-table">
+        <thead><tr>
+          <th>Status</th><th>Target</th>
+          <th style="text-align:right;">Matched</th>
+          <th>Match %</th>
+          <th style="text-align:right;">Orphans</th>
+          <th></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+// ── Correlation ───────────────────────────────────────────────────────────────
+
+function _applyCorrData(corr) {
+  if (corr.columns && corr.columns.length) {
+    renderCorrMatrix(corr.columns, corr.matrix);
+    _updateCorrBtn(corr.computed_at);
+    const badge = document.getElementById('corrTabBadge');
+    badge.textContent = `${corr.columns.length}×${corr.columns.length}`;
+    badge.style.display = '';
+  }
+}
+
+function _updateCorrBtn(computedAt) {
+  const btn  = document.getElementById('corrBtn');
+  const meta = document.getElementById('corrMeta');
+  const date = (computedAt || '').slice(0, 10);
+  btn.disabled = false;
+  btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Re-run';
+  meta.textContent = date ? `Last run ${date}` : '';
+}
+
+async function runCorrelation() {
+  const btn  = document.getElementById('corrBtn');
+  const body = document.getElementById('corrBody');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>';
+  body.innerHTML = '<div class="empty-state"><div class="spinner-border text-primary mb-2"></div><p>Computing Pearson correlations…</p></div>';
+
+  // Switch to Correlation tab
+  bootstrap.Tab.getOrCreateInstance(
+    document.querySelector('[data-bs-target="#pane-corr"]')).show();
+
+  let jobId;
+  try {
+    const d = await apiFetch('/api/correlation', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ database: REL_DB, schema: REL_SCHEMA, table: REL_TABLE }),
+    });
+    jobId = d.job_id;
+  } catch (e) {
+    body.innerHTML = `<div class="alert alert-danger">${e.message}</div>`;
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-grid-3x3 me-1"></i>Run Correlation';
+    return;
+  }
+
+  const poll = setInterval(async () => {
+    try {
+      const job = await apiFetch(`/api/correlation/${jobId}`);
+      if (job.status === 'done') {
+        clearInterval(poll);
+        if (job.message) {
+          body.innerHTML = `<div class="empty-state"><i class="bi bi-info-circle"></i><p>${job.message}</p></div>`;
+          _updateCorrBtn(null);
+        } else {
+          _applyCorrData(job);
+        }
+      } else if (job.status === 'error') {
+        clearInterval(poll);
+        body.innerHTML = `<div class="alert alert-danger">${job.error}</div>`;
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-grid-3x3 me-1"></i>Run Correlation';
+      }
+    } catch (e) {
+      clearInterval(poll);
+      btn.disabled = false;
+    }
+  }, 1500);
+}
+
+function corrColor(v) {
+  if (v === null || v === undefined) return '#21262d';
+  const alpha = Math.round((0.12 + Math.abs(v) * 0.88) * 255).toString(16).padStart(2,'0');
+  return v > 0 ? `#58a6ff${alpha}` : `#f85149${alpha}`;
+}
+
+function renderCorrMatrix(cols, matrix) {
+  const body = document.getElementById('corrBody');
+  const n = cols.length;
+  let html = `<div style="overflow-x:auto;">
+    <table style="border-collapse:collapse;font-size:11px;white-space:nowrap;">
+      <thead><tr><th style="padding:4px 8px;color:var(--muted);"></th>`;
+  cols.forEach(c => {
+    html += `<th style="padding:4px 6px;color:var(--muted);font-weight:600;
+                        writing-mode:vertical-rl;transform:rotate(180deg);
+                        max-width:24px;overflow:hidden;"
+                 title="${c}">${c}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+
+  for (let i = 0; i < n; i++) {
+    html += `<tr><td style="padding:4px 10px;color:var(--text);font-weight:600;
+                            text-align:right;max-width:130px;overflow:hidden;
+                            text-overflow:ellipsis;font-family:monospace;font-size:11px;"
+                     title="${cols[i]}">${cols[i]}</td>`;
+    for (let j = 0; j < n; j++) {
+      const v = matrix[i][j];
+      const bg = corrColor(v);
+      const txt = v === null ? '—' : i === j ? '1.00'
+                : v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2);
+      const tc = Math.abs(v ?? 0) > 0.55 ? '#fff' : 'var(--text)';
+      html += `<td style="padding:5px 7px;background:${bg};color:${tc};
+                          text-align:center;border:1px solid var(--bg);border-radius:2px;
+                          font-variant-numeric:tabular-nums;min-width:50px;"
+                   title="${cols[i]} × ${cols[j]}: ${txt}">${txt}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += `</tbody></table></div>
+  <div style="margin-top:10px;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:8px;">
+    <span>Legend:</span>
+    <span style="width:12px;height:12px;background:#f8514988;display:inline-block;border-radius:2px;"></span>Negative
+    <span style="width:12px;height:12px;background:#21262d;display:inline-block;border-radius:2px;"></span>Near zero
+    <span style="width:12px;height:12px;background:#58a6ff88;display:inline-block;border-radius:2px;"></span>Positive
+  </div>`;
+  body.innerHTML = html;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,2 @@
+2026-06-03 14:06:05,715 [ERROR] FACT_SALES.PROMOTION_KEY | null_rate: Null rate 50.5% exceeds threshold 10.0% (10,094 of 20,000 rows)
+2026-06-03 14:28:56,675 [ERROR] FACT_SALES.PROMOTION_KEY | null_rate: Null rate 50.5% exceeds threshold 10.0% (10,094 of 20,000 rows)

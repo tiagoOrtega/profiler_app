@@ -1,0 +1,10 @@
+snowflake-connector-python>=3.5.0
+pandas>=2.0.0
+flask>=3.0.0
+jinja2>=3.1.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+pyyaml>=6.0
+databricks-sql-connector>=3.0.0
+pytest>=8.0.0
+pytest-cov>=5.0.0
