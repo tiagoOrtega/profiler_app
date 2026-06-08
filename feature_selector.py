@@ -1,19 +1,25 @@
 """
 Feature relevance ranking for clustering feature selection.
 
-Given a target column, scores every other numeric column by how much
-information it shares with the target, using:
+Given a target column, ranks every other feature — including engineered
+features produced by FeatureEngineer (log1p transforms, ratio pairs) —
+by how much information it shares with the target.
 
-  1. Mutual Information (sklearn) — captures non-linear relationships.
-     Uses mutual_info_regression for numeric targets,
-     mutual_info_classif for categorical/low-cardinality targets.
+Scoring
+-------
+1. Mutual Information (sklearn)
+   mutual_info_regression  → numeric target
+   mutual_info_classif     → categorical / low-cardinality target
+   Captures non-linear relationships (65% weight).
 
-  2. Pearson Correlation — linear relationship strength (numeric targets only).
+2. Pearson Correlation (numeric targets only, 35% weight)
+   Fast linear-relationship signal.
 
-  3. Combined score = 0.65 × norm(MI) + 0.35 × |corr|
-     (MI carries more weight; correlation adds a linear bias signal).
+Combined score = 0.65 × norm(MI) + 0.35 × |corr|
 
-The top-k features are flagged as "recommended" for clustering.
+The top-k features are flagged "recommended".
+If no feature_ids are supplied the selector analyses all suggestions
+returned by FeatureEngineer (originals + log1p + ratios).
 """
 
 from __future__ import annotations
@@ -24,56 +30,57 @@ from pathlib import Path
 import numpy as np
 
 
-# ── Target-type detection ─────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _is_categorical(col_name: str, data_type: str, values: np.ndarray, profile_col: dict) -> bool:
-    """Heuristic: treat as categorical if low cardinality or non-numeric type."""
-    dtype_upper = data_type.upper()
-    # Non-numeric types → always categorical
-    if any(t in dtype_upper for t in ("CHAR","TEXT","VARCHAR","STRING","BOOL","BOOLEAN")):
+def _is_categorical(data_type: str, values: np.ndarray, profile_col: dict) -> bool:
+    dtype = data_type.upper()
+    if any(t in dtype for t in ("CHAR", "TEXT", "VARCHAR", "STRING", "BOOL")):
         return True
-    # Numeric but very few distinct values → treat as categorical
-    n_distinct = profile_col.get("distinct_count", 0)
-    if n_distinct and n_distinct <= 20:
+    n_dist = profile_col.get("distinct_count", 0)
+    if n_dist and n_dist <= 20:
         return True
     return False
 
 
-# ── Label encoding for categorical targets ────────────────────────────────────
-
 def _encode_categorical(values: np.ndarray) -> np.ndarray:
-    """Integer-encode a string/mixed array."""
     unique = {v: i for i, v in enumerate(sorted(set(str(v) for v in values if v is not None)))}
     return np.array([unique.get(str(v), -1) for v in values], dtype=np.int32)
 
 
-# ── Main engine ───────────────────────────────────────────────────────────────
+def _feat_type(name: str) -> str:
+    if name.startswith("log1p_"):  return "log1p"
+    if name.startswith("ratio_"):  return "ratio"
+    return "original"
+
+
+# ── Engine ────────────────────────────────────────────────────────────────────
 
 class FeatureSelector:
 
-    TOP_K_RATIO  = 0.6     # recommend the top 60% of features (min 2, max 15)
-    MAX_FEATURES = 20      # cap analysed features
-    SAMPLE_SIZE  = 8_000   # rows fetched for analysis
+    TOP_K_RATIO  = 0.6
+    MAX_FEATURES = 20
+    SAMPLE_SIZE  = 8_000
 
     def __init__(self, conn, reports_dir: Path):
         self.conn = conn
         self.reports_dir = reports_dir
+
+    # ── helpers ───────────────────────────────────────────────────────────────
 
     def _load_profile(self, db: str, schema: str, table: str) -> dict:
         key = f"{db.upper()}__{schema.upper()}__{table.upper()}"
         rp  = self.reports_dir / f"{key}.json"
         if not rp.exists():
             raise FileNotFoundError(
-                f"No saved profile for {db}.{schema}.{table}. Profile the table first."
+                f"No profile for {db}.{schema}.{table}. Profile the table first."
             )
         with open(rp) as f:
             return json.load(f)
 
-    def _fetch_columns(
+    def _fetch_raw(
         self,
         db: str, schema: str, table: str,
-        columns: list[str],
-        limit: int,
+        columns: list[str], limit: int,
     ) -> np.ndarray:
         tbl_ref  = self.conn.table_ref(db, schema, table)
         qcols    = ", ".join(self.conn.quote_col(c) for c in columns)
@@ -86,98 +93,99 @@ class FeatureSelector:
             dtype=object,
         )
 
+    # ── main ─────────────────────────────────────────────────────────────────
+
     def analyze(
         self,
-        db: str,
-        schema: str,
-        table: str,
-        target_col: str,
+        db:          str,
+        schema:      str,
+        table:       str,
+        target_col:  str,
+        feature_ids: list[str] | None = None,
         sample_size: int = SAMPLE_SIZE,
     ) -> dict:
         """
-        Rank all numeric columns by relevance to *target_col*.
+        Rank all features by relevance to *target_col*.
 
-        Returns a dict with:
-          target       — the target column name
-          target_type  — "numeric" | "categorical"
-          method       — description of the scoring method
-          features     — list sorted by score desc, each:
-            {name, mi_score, corr_score, combined_score, rank, recommended}
+        *feature_ids* — list of feature IDs from FeatureEngineer.suggest()
+        (may include originals, log1p_*, ratio_* variants).
+        When None, all suggestions are analysed (original + engineered).
         """
-        try:
-            from sklearn.feature_selection import (
-                mutual_info_regression,
-                mutual_info_classif,
-            )
-            from sklearn.preprocessing import StandardScaler
-            from sklearn.impute import SimpleImputer
-        except ImportError as exc:
-            raise ImportError(
-                "scikit-learn is required. Run: pip install scikit-learn"
-            ) from exc
+        from sklearn.feature_selection import (
+            mutual_info_regression,
+            mutual_info_classif,
+        )
+        from sklearn.impute import SimpleImputer
+        from clustering import FeatureEngineer
 
-        profile = self._load_profile(db, schema, table)
+        profile  = self._load_profile(db, schema, table)
         col_meta = {c["name"]: c for c in profile.get("columns", [])}
 
-        # All numeric columns (excluding the target itself)
-        numeric_cols = [
+        # Base numeric columns (excluding target)
+        base_cols = [
             c["name"] for c in profile["columns"]
             if c.get("mean") is not None and c["name"] != target_col
         ][:self.MAX_FEATURES]
 
-        if not numeric_cols:
+        if not base_cols:
             raise ValueError("No numeric feature columns found (excluding target).")
 
-        # Determine target type from profile metadata
-        target_meta  = col_meta.get(target_col, {})
-        target_dtype = target_meta.get("data_type", "")
-
-        # Fetch target + feature columns together
-        all_cols = [target_col] + numeric_cols
-        raw = self._fetch_columns(db, schema, table, all_cols, sample_size)
-
+        # Fetch raw base data + target together
+        all_fetch = [target_col] + base_cols
+        raw       = self._fetch_raw(db, schema, table, all_fetch, sample_size)
         if len(raw) < 20:
             raise ValueError(f"Too few rows ({len(raw)}) for feature importance analysis.")
 
-        # Split target and features
-        y_raw = raw[:, 0]
-        X_raw = raw[:, 1:].astype(float)
+        y_raw  = raw[:, 0]
+        X_base = raw[:, 1:].astype(float)
 
-        is_cat = _is_categorical(target_col, target_dtype, y_raw, target_meta)
+        # Apply FeatureEngineer to build the full engineered feature matrix
+        fe           = FeatureEngineer(base_cols, X_base)
+        suggestions  = fe.suggest()
+        all_ids      = [s["id"] for s in suggestions]
+
+        if feature_ids:
+            # Only analyse the IDs the user has selected (or all valid ones)
+            valid = set(all_ids)
+            use_ids = [fid for fid in feature_ids if fid in valid] or all_ids
+        else:
+            # Default: use all auto-selected suggestions
+            use_ids = [s["id"] for s in suggestions if s["selected"]]
+
+        X_eng, feature_names = fe.apply(use_ids)
+
+        # Target encoding
+        target_meta = col_meta.get(target_col, {})
+        target_dtype = target_meta.get("data_type", "")
+        is_cat = _is_categorical(target_dtype, y_raw, target_meta)
 
         if is_cat:
             y = _encode_categorical(y_raw)
         else:
             y = y_raw.astype(float)
-            y_nan = np.isnan(y)
-            if y_nan.any():
-                y[y_nan] = np.nanmean(y)
+            nan_mask = np.isnan(y)
+            if nan_mask.any():
+                y[nan_mask] = float(np.nanmean(y))
 
-        # Impute X
+        # Impute missing feature values
         imputer = SimpleImputer(strategy="mean")
-        X = imputer.fit_transform(X_raw)
+        X       = imputer.fit_transform(X_eng)
 
-        # Remove rows where target is unknown (encoded as -1 for categorical)
-        if is_cat:
-            mask = y >= 0
-        else:
-            mask = ~np.isnan(raw[:, 0].astype(float))
-        X, y = X[mask], y[mask]
-
+        # Keep only rows where target is known
+        good = (y >= 0) if is_cat else ~np.isnan(raw[:, 0].astype(float))
+        X, y = X[good], y[good]
         if len(X) < 10:
             raise ValueError("Too few complete rows after null filtering.")
 
         # ── Mutual Information ─────────────────────────────────────────────────
         rs = 42
-        if is_cat:
-            mi_raw = mutual_info_classif(X, y, random_state=rs)
-        else:
-            mi_raw = mutual_info_regression(X, y, random_state=rs)
-
+        mi_raw = (mutual_info_classif(X, y, random_state=rs)
+                  if is_cat else
+                  mutual_info_regression(X, y, random_state=rs))
         mi_max  = mi_raw.max() if mi_raw.max() > 0 else 1.0
         mi_norm = mi_raw / mi_max
 
-        # ── Pearson Correlation (numeric target only) ──────────────────────────
+        # ── Pearson Correlation (numeric targets only) ──────────────────────────
         if not is_cat:
             corr = np.array([
                 abs(float(np.corrcoef(X[:, j], y)[0, 1]))
@@ -186,35 +194,34 @@ class FeatureSelector:
             ])
             np.nan_to_num(corr, nan=0.0, copy=False)
         else:
-            corr = np.zeros(len(numeric_cols))
+            corr = np.zeros(len(feature_names))
 
         # ── Combined score ─────────────────────────────────────────────────────
-        combined = 0.65 * mi_norm + 0.35 * corr
-        combined = np.clip(combined, 0.0, 1.0)
-
-        # ── Build ranked result ────────────────────────────────────────────────
-        order   = np.argsort(combined)[::-1]
-        n_rec   = max(2, min(self.MAX_FEATURES, int(len(numeric_cols) * self.TOP_K_RATIO)))
+        combined = np.clip(0.65 * mi_norm + 0.35 * corr, 0.0, 1.0)
+        order    = np.argsort(combined)[::-1]
+        n_rec    = max(2, min(self.MAX_FEATURES, int(len(feature_names) * self.TOP_K_RATIO)))
 
         features = []
         for rank_idx, col_idx in enumerate(order):
-            col_name = numeric_cols[col_idx]
-            score    = float(combined[col_idx])
+            name  = feature_names[col_idx]
+            score = float(combined[col_idx])
             features.append({
-                "name":          col_name,
-                "mi_score":      round(float(mi_norm[col_idx]), 4),
-                "corr_score":    round(float(corr[col_idx]),    4) if not is_cat else None,
-                "combined_score":round(score, 4),
-                "rank":          rank_idx + 1,
-                "recommended":   rank_idx < n_rec,
+                "name":           name,
+                "feat_type":      _feat_type(name),
+                "mi_score":       round(float(mi_norm[col_idx]), 4),
+                "corr_score":     round(float(corr[col_idx]),    4) if not is_cat else None,
+                "combined_score": round(score, 4),
+                "rank":           rank_idx + 1,
+                "recommended":    rank_idx < n_rec,
             })
 
         return {
-            "target":      target_col,
-            "target_type": "categorical" if is_cat else "numeric",
-            "method":      "mutual_info_classif" if is_cat else "mutual_info_regression + pearson",
-            "sample_size": int(len(X)),
-            "n_features":  len(features),
+            "target":        target_col,
+            "target_type":   "categorical" if is_cat else "numeric",
+            "method":        "mutual_info_classif" if is_cat
+                             else "mutual_info_regression + pearson",
+            "sample_size":   int(len(X)),
+            "n_features":    len(features),
             "n_recommended": n_rec,
-            "features":    features,
+            "features":      features,
         }

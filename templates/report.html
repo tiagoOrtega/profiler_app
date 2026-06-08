@@ -34,8 +34,41 @@
     display: flex; align-items: center; gap: 6px;
     padding: 8px 12px; background: var(--bg3);
     border-bottom: 1px solid var(--border2);
+    position: relative;   /* anchor for colour popup */
   }
-  .col-card-name { font-size: 12px; font-weight: 600; color: var(--text); font-family: monospace; }
+  .col-card-name { font-size: 12px; font-weight: 600; color: var(--text); font-family: monospace;
+                   transition: color .15s; }
+
+  /* ── Column colour picker ────────────────────────────────────── */
+  .col-color-btn {
+    background: none; border: none; padding: 2px 3px; cursor: pointer;
+    opacity: .4; flex-shrink: 0; line-height: 1; border-radius: 4px;
+    transition: opacity .12s, background .12s;
+  }
+  .col-color-btn:hover, .col-color-btn.active { opacity: 1; background: var(--border2); }
+
+  .col-color-popup {
+    display: none; position: absolute; top: calc(100% + 4px); right: 4px;
+    z-index: 300; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px; gap: 5px; flex-wrap: wrap; width: 156px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.45);
+  }
+  .col-color-popup.open { display: flex; }
+  .col-color-popup-label {
+    width: 100%; font-size: 10px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .05em; margin-bottom: 2px;
+  }
+
+  .col-swatch {
+    width: 22px; height: 22px; border-radius: 50%; cursor: pointer; flex-shrink: 0;
+    border: 2px solid transparent; transition: transform .1s, border-color .1s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .col-swatch:hover      { transform: scale(1.25); border-color: rgba(255,255,255,.55); }
+  .col-swatch.swatch-clear {
+    background: var(--border2) !important; border: 1px dashed var(--muted) !important;
+    font-size: 12px; color: var(--muted);
+  }
   .col-card-type {
     font-size: 10px; color: var(--muted); background: var(--border2);
     padding: 1px 6px; border-radius: 3px; white-space: nowrap;
@@ -233,6 +266,13 @@
                 style="display:none;">
           <i class="bi bi-cloud-upload me-1"></i>Apply to DB
         </button>
+        <button id="clearColorsBtn" type="button"
+                class="btn btn-sm btn-outline-secondary"
+                onclick="clearAllColors()"
+                style="display:none;"
+                title="Remove all column colour tags">
+          <i class="bi bi-palette me-1"></i>Clear Colors
+        </button>
         <button id="alertFilterBtn" type="button"
                 class="btn btn-sm btn-outline-secondary"
                 onclick="toggleAlertFilter()"
@@ -261,8 +301,30 @@
 
         <!-- Head -->
         <div class="col-card-head">
-          <span class="col-card-name">{{ col.name }}</span>
+          <span class="col-card-name" id="colname-{{ col.name|replace('.','_') }}">{{ col.name }}</span>
           <span class="col-card-type">{{ col.data_type }}</span>
+
+          <!-- Colour tagger -->
+          <button class="col-color-btn" id="colbtn-{{ col.name|replace('.','_') }}"
+                  title="Tag column with a colour"
+                  onclick="toggleColorPicker('{{ col.name }}', this)">
+            <i class="bi bi-circle-fill" style="font-size:8px;"></i>
+          </button>
+          <!-- Colour popup (absolute, anchored to this card head) -->
+          <div class="col-color-popup" id="colorpop-{{ col.name|replace('.','_') }}">
+            <div class="col-color-popup-label">Tag colour</div>
+            {%- set palette = ['#58a6ff','#3fb950','#f85149','#d29922','#bc8cff',
+                                '#ff7b72','#56d364','#e3b341','#79c0ff','#ff79c6',
+                                '#fa7970','#a5d6ff'] -%}
+            {% for c in palette %}
+            <div class="col-swatch" style="background:{{ c }};"
+                 onclick="applyColumnColor('{{ col.name }}', '{{ c }}')"></div>
+            {% endfor %}
+            <div class="col-swatch swatch-clear"
+                 onclick="applyColumnColor('{{ col.name }}', null)"
+                 title="Remove colour">✕</div>
+          </div>
+
           <div class="ms-auto">
             {% if col.null_rate > 0.5 %}
               <span class="badge" style="background:var(--red);font-size:10px;">
@@ -539,8 +601,8 @@
               <!-- populated by JS from profile columns -->
             </select>
             <div style="font-size:10px; color:var(--muted); margin-top:4px; line-height:1.4;">
-              The column whose variation you want features to explain.
-              E.g. <code>CUSTOMER_SEGMENT</code>, <code>GROSS_AMOUNT</code>.
+              Column whose variation the analysis explains. E.g. <code>CUSTOMER_SEGMENT</code>, <code>GROSS_AMOUNT</code>.<br>
+              <b>If no target is selected</b>, all features checked in the Features section will be used as-is.
             </div>
           </div>
           <div style="padding-top:20px;">
@@ -813,18 +875,35 @@ function _buildTargetColSelect() {
   }
 }
 
-async function analyzeFeatureImportance() {
-  const target = document.getElementById('targetColSelect')?.value;
-  if (!target) { alert('Select a target column first.'); return; }
+// Track last importance results for cross-referencing with feature pills
+let _lastImpResults = null;
 
-  const btn     = document.getElementById('featImpBtn');
+async function analyzeFeatureImportance() {
+  const target  = document.getElementById('targetColSelect')?.value || '';
   const results = document.getElementById('featImpResults');
+  const btn     = document.getElementById('featImpBtn');
+
+  // If no target: just use current selection and show a hint
+  if (!target) {
+    results.style.display = '';
+    results.innerHTML = `<div style="padding:10px 12px; border:1px solid var(--border2);
+      border-radius:6px; font-size:12px; color:var(--muted); background:var(--bg3);">
+      <i class="bi bi-info-circle me-1"></i>
+      No target column selected — the <b>${_selectedFeatureIds.length} features checked below</b>
+      will be used directly in clustering. Select a target column to rank them by importance.
+    </div>`;
+    return;
+  }
+
   btn.disabled  = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Analysing…';
   results.style.display = '';
   results.innerHTML = `<div style="text-align:center; padding:16px; color:var(--muted);">
     <div class="spinner-border text-primary mb-2" style="width:1.4rem;height:1.4rem;"></div>
-    <p style="font-size:12px;">Computing mutual information and correlations for all numeric features vs <b>${target}</b>…</p>
+    <p style="font-size:12px; margin:0;">
+      Ranking <b>${_selectedFeatureIds.length} features</b>
+      (including engineered) by relevance to <b>${target}</b>…
+    </p>
   </div>`;
 
   let jobId;
@@ -832,8 +911,13 @@ async function analyzeFeatureImportance() {
     const d = await apiFetch('/api/clustering/feature-importance', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
-        database: REL_DB, schema: REL_SCHEMA, table: REL_TABLE,
+        database:    REL_DB,
+        schema:      REL_SCHEMA,
+        table:       REL_TABLE,
         target_col:  target,
+        // Pass ALL current feature IDs (originals + engineered)
+        // so the backend runs importance on the same feature space
+        feature_ids: _selectedFeatureIds.length ? _selectedFeatureIds : null,
         sample_size: parseInt(document.getElementById('sampleSize')?.value || '8000'),
       }),
     });
@@ -849,6 +933,7 @@ async function analyzeFeatureImportance() {
       const job = await apiFetch(`/api/clustering/feature-importance/${jobId}`);
       if (job.status === 'done') {
         clearInterval(poll);
+        _lastImpResults = job;
         _renderFeatureImportance(job);
         btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Re-analyze';
       } else if (job.status === 'error') {
@@ -861,90 +946,261 @@ async function analyzeFeatureImportance() {
 }
 
 function _renderFeatureImportance(data) {
-  const results = document.getElementById('featImpResults');
-  if (!results) return;
+  const container = document.getElementById('featImpResults');
+  if (!container) return;
 
   const features = data.features || [];
   const nRec     = data.n_recommended || 0;
   const isCat    = data.target_type === 'categorical';
 
-  // Build the ranked bar chart
-  const rows = features.map((f, i) => {
-    const pct    = (f.combined_score * 100).toFixed(0);
-    const color  = f.combined_score >= 0.6 ? 'var(--green)'
-                 : f.combined_score >= 0.3 ? 'var(--accent)'
-                 : f.combined_score >= 0.1 ? 'var(--yellow)'
-                 : 'var(--muted)';
-    const badge  = f.recommended
-      ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;
-            background:rgba(63,185,80,.15);color:var(--green);">recommended</span>`
+  // Feature type badges
+  const typeBadge = ftype => {
+    if (ftype === 'log1p') return `<span style="font-size:9px;padding:0 4px;border-radius:2px;
+      background:rgba(88,166,255,.15);color:var(--accent);">log1p</span>`;
+    if (ftype === 'ratio') return `<span style="font-size:9px;padding:0 4px;border-radius:2px;
+      background:rgba(63,185,80,.12);color:var(--green);">ratio</span>`;
+    return '';
+  };
+
+  const rows = features.map(f => {
+    const pct   = (f.combined_score * 100).toFixed(0);
+    const color = f.combined_score >= 0.6 ? 'var(--green)'
+                : f.combined_score >= 0.3 ? 'var(--accent)'
+                : f.combined_score >= 0.1 ? 'var(--yellow)'
+                : 'var(--muted)';
+    const corr  = (!isCat && f.corr_score !== null)
+      ? `<span style="font-size:10px;color:var(--muted);white-space:nowrap;">r=${f.corr_score.toFixed(2)}</span>`
       : '';
-    const corr = (!isCat && f.corr_score !== null)
-      ? `<span style="font-size:10px;color:var(--muted);">r=${f.corr_score.toFixed(2)}</span>`
-      : '';
-    return `<div style="display:flex; align-items:center; gap:8px; padding:4px 0;
-                        border-bottom:1px solid var(--border2);" data-feature="${f.name}">
-      <span style="font-size:10px; color:var(--muted); width:18px; text-align:right;">${f.rank}</span>
-      <code style="flex:1; font-size:11px; min-width:100px; overflow:hidden; text-overflow:ellipsis;
-                   white-space:nowrap;" title="${f.name}">${f.name}</code>
-      <div style="flex:2; min-width:80px; height:6px; background:var(--border2); border-radius:3px; overflow:hidden;">
-        <div style="width:${pct}%; height:6px; background:${color}; border-radius:3px;
-                    transition:width .4s;"></div>
+    // Store recommended as data attribute — used by _applyRecommended()
+    return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;
+                        border-bottom:1px solid var(--border2);"
+                data-feature="${f.name}"
+                data-recommended="${f.recommended ? '1' : '0'}">
+      <span style="font-size:10px;color:var(--muted);width:18px;text-align:right;">${f.rank}</span>
+      <span style="flex:1;font-family:monospace;font-size:11px;overflow:hidden;
+                   text-overflow:ellipsis;white-space:nowrap;" title="${f.name}">
+        ${f.name} ${typeBadge(f.feat_type || '')}
+      </span>
+      <div style="flex:2;min-width:70px;height:6px;background:var(--border2);
+                  border-radius:3px;overflow:hidden;">
+        <div style="width:${pct}%;height:6px;background:${color};
+                    border-radius:3px;transition:width .4s;"></div>
       </div>
-      <span style="font-size:11px; color:${color}; font-weight:600; width:36px; text-align:right;">${pct}%</span>
+      <span style="font-size:11px;color:${color};font-weight:700;
+                   width:34px;text-align:right;">${pct}%</span>
       ${corr}
-      ${badge}
+      ${f.recommended
+        ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;
+                background:rgba(63,185,80,.15);color:var(--green);white-space:nowrap;">★ rec</span>`
+        : `<span style="font-size:9px;padding:1px 5px;border-radius:3px;
+                background:var(--border2);color:var(--muted);white-space:nowrap;">skip</span>`}
     </div>`;
   }).join('');
 
-  results.innerHTML = `
-    <div style="border:1px solid var(--border2); border-radius:6px; overflow:hidden;">
-      <div style="padding:8px 12px; background:var(--bg3); border-bottom:1px solid var(--border2);
-                  font-size:11px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+  // Colour legend
+  const legend = `
+    <div style="display:flex;gap:14px;flex-wrap:wrap;padding:8px 12px;
+                border-top:1px solid var(--border2);font-size:10px;color:var(--muted);">
+      <span style="font-weight:600;color:var(--text);">Legend:</span>
+      <span><span style="display:inline-block;width:10px;height:10px;
+                          background:var(--green);border-radius:2px;margin-right:4px;"></span>≥60% High</span>
+      <span><span style="display:inline-block;width:10px;height:10px;
+                          background:var(--accent);border-radius:2px;margin-right:4px;"></span>≥30% Medium</span>
+      <span><span style="display:inline-block;width:10px;height:10px;
+                          background:var(--yellow);border-radius:2px;margin-right:4px;"></span>≥10% Low</span>
+      <span><span style="display:inline-block;width:10px;height:10px;
+                          background:var(--muted);border-radius:2px;margin-right:4px;"></span>&lt;10% Noise</span>
+      <span style="margin-left:8px;">
+        <span style="font-size:9px;padding:0 4px;border-radius:2px;
+               background:rgba(88,166,255,.15);color:var(--accent);">log1p</span> log-transform</span>
+      <span>
+        <span style="font-size:9px;padding:0 4px;border-radius:2px;
+               background:rgba(63,185,80,.12);color:var(--green);">ratio</span> ratio feature</span>
+    </div>`;
+
+  container.innerHTML = `
+    <div style="border:1px solid var(--border2);border-radius:6px;overflow:hidden;">
+      <div style="padding:8px 12px;background:var(--bg3);border-bottom:1px solid var(--border2);
+                  font-size:11px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <i class="bi bi-sort-down" style="color:var(--accent);"></i>
-        <b>${features.length} features</b> ranked by relevance to
+        <b>${features.length} features</b> ranked vs
         <code>${data.target}</code>
-        <span style="color:var(--muted);">(${data.target_type}, ${data.method}, n=${data.sample_size?.toLocaleString()})</span>
-        <button class="btn btn-sm ms-auto" style="font-size:11px; padding:1px 8px;"
-                onclick="_applyRecommended()" title="Pre-select top ${nRec} features">
-          <i class="bi bi-check2-square me-1"></i>Use Top ${nRec} Features
+        <span style="color:var(--muted);">(${data.target_type} · ${data.method} · n=${(data.sample_size||0).toLocaleString()})</span>
+        <button class="btn btn-sm ms-auto" style="font-size:11px;padding:1px 8px;"
+                onclick="_applyRecommended()">
+          <i class="bi bi-check2-square me-1"></i>Use Top ${nRec} (★ rec)
         </button>
       </div>
-      <div style="padding:8px 12px; max-height:280px; overflow-y:auto;">${rows}</div>
+      <div style="padding:8px 12px;max-height:300px;overflow-y:auto;">${rows}</div>
+      ${legend}
     </div>`;
 }
 
 function _applyRecommended() {
-  const results  = document.getElementById('featImpResults');
-  if (!results) return;
-  // Read recommended feature names from data attributes
-  const recNames = [...results.querySelectorAll('[data-feature]')]
-    .filter(el => {
-      // match against _allFeatureSuggestions recommended
-      const name = el.dataset.feature;
-      const row  = el;
-      // Detect if the row has the "recommended" badge
-      return row.innerHTML.includes('recommended');
-    })
+  const container = document.getElementById('featImpResults');
+  if (!container) return;
+
+  // Collect recommended feature IDs using the data-recommended attribute (reliable)
+  const recIds = [...container.querySelectorAll('[data-feature][data-recommended="1"]')]
     .map(el => el.dataset.feature);
 
-  // Map to feature IDs in _allFeatureSuggestions (original columns only)
+  if (!recIds.length) {
+    alert('No recommended features found. Run Analyze Features first.');
+    return;
+  }
+
+  // Apply: include any recommended ID that exists in _allFeatureSuggestions
+  // (covers originals + log1p + ratio engineered features)
   const available = new Set(_allFeatureSuggestions.map(f => f.id));
-  const newSel    = recNames.filter(n => available.has(n));
+  _selectedFeatureIds = recIds.filter(id => available.has(id));
 
-  if (!newSel.length) return;
+  // If a recommended feature is an engineered one not yet in suggestions,
+  // add it dynamically so the pill renders correctly
+  recIds.forEach(id => {
+    if (!available.has(id)) {
+      const ftype = id.startsWith('log1p_') ? 'log1p' : id.startsWith('ratio_') ? 'ratio' : 'original';
+      _allFeatureSuggestions.push({
+        id, type: ftype, selected: true,
+        description: id, source_cols: [],
+      });
+    }
+  });
 
-  _selectedFeatureIds = newSel;
   _renderFeaturePills(_allFeatureSuggestions, _selectedFeatureIds);
 
-  // Flash the features section to show the update
+  // Flash the pills section to confirm the update
   const pills = document.getElementById('colPills');
   if (pills) {
     pills.style.transition = 'opacity .15s';
-    pills.style.opacity = '0.4';
-    setTimeout(() => { pills.style.opacity = '1'; }, 200);
+    pills.style.opacity = '0.35';
+    setTimeout(() => { pills.style.opacity = '1'; }, 220);
   }
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COLUMN COLOUR TAGGING
+// ══════════════════════════════════════════════════════════════════════════════
+
+const COL_PALETTE = [
+  '#58a6ff','#3fb950','#f85149','#d29922','#bc8cff',
+  '#ff7b72','#56d364','#e3b341','#79c0ff','#ff79c6',
+  '#fa7970','#a5d6ff',
+];
+
+let _colColors = {};   // { "COL_NAME": "#hex" }
+
+// Auto-load saved colours on page ready
+document.addEventListener('DOMContentLoaded', () => {
+  apiFetch(`/api/columns/colors?db=${REL_DB}&schema=${REL_SCHEMA}&table=${REL_TABLE}`)
+    .then(d => { _colColors = d || {}; _applyAllColors(); })
+    .catch(() => {});
+});
+
+function _safeId(colName) {
+  return colName.replace(/\./g, '_').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function _applyAllColors() {
+  Object.entries(_colColors).forEach(([col, color]) => _applyOneColor(col, color));
+  // Show "Clear Colors" button when there are tagged columns
+  const clearBtn = document.getElementById('clearColorsBtn');
+  if (clearBtn) clearBtn.style.display = Object.keys(_colColors).length ? '' : 'none';
+}
+
+function _applyOneColor(colName, color) {
+  const sid      = _safeId(colName);
+  const nameEl   = document.getElementById(`colname-${sid}`);
+  const btn      = document.getElementById(`colbtn-${sid}`);
+
+  if (nameEl) {
+    nameEl.style.color = color || '';
+    // Add/remove a subtle left border accent on the card
+    const card = nameEl.closest('.col-card');
+    if (card) card.style.borderLeftColor = color ? color + '88' : '';
+  }
+  if (btn) {
+    const icon = btn.querySelector('i');
+    if (icon) icon.style.color = color || '';
+    btn.classList.toggle('active', !!color);
+  }
+}
+
+function toggleColorPicker(colName, btn) {
+  const sid    = _safeId(colName);
+  const popup  = document.getElementById(`colorpop-${sid}`);
+  if (!popup) return;
+
+  const isOpen = popup.classList.contains('open');
+
+  // Close all other open pickers first
+  document.querySelectorAll('.col-color-popup.open').forEach(p => p.classList.remove('open'));
+
+  if (!isOpen) {
+    popup.classList.add('open');
+    // Highlight current colour swatch
+    const cur = _colColors[colName];
+    popup.querySelectorAll('.col-swatch:not(.swatch-clear)').forEach(sw => {
+      sw.style.borderColor = sw.style.background === cur ? 'rgba(255,255,255,.7)' : 'transparent';
+    });
+  }
+}
+
+function applyColumnColor(colName, color) {
+  const sid = _safeId(colName);
+
+  // Update state
+  if (color) {
+    _colColors[colName] = color;
+  } else {
+    delete _colColors[colName];
+  }
+
+  // Apply visually
+  _applyOneColor(colName, color);
+
+  // Close popup
+  const popup = document.getElementById(`colorpop-${sid}`);
+  if (popup) popup.classList.remove('open');
+
+  // Show/hide Clear Colors button
+  const clearBtn = document.getElementById('clearColorsBtn');
+  if (clearBtn) clearBtn.style.display = Object.keys(_colColors).length ? '' : 'none';
+
+  // Persist (fire-and-forget)
+  apiFetch('/api/columns/colors', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      database: REL_DB, schema: REL_SCHEMA, table: REL_TABLE,
+      colors: _colColors,
+    }),
+  }).catch(() => {});
+}
+
+function clearAllColors() {
+  _colColors = {};
+  // Reset all name colours and card borders
+  document.querySelectorAll('.col-card-name').forEach(el => el.style.color = '');
+  document.querySelectorAll('.col-card').forEach(el => el.style.borderLeftColor = '');
+  document.querySelectorAll('.col-color-btn').forEach(btn => {
+    btn.classList.remove('active');
+    const icon = btn.querySelector('i');
+    if (icon) icon.style.color = '';
+  });
+  const clearBtn = document.getElementById('clearColorsBtn');
+  if (clearBtn) clearBtn.style.display = 'none';
+  // Persist
+  apiFetch('/api/columns/colors', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ database: REL_DB, schema: REL_SCHEMA, table: REL_TABLE, colors: {} }),
+  }).catch(() => {});
+}
+
+// Close colour popup when clicking anywhere outside it
+document.addEventListener('click', e => {
+  if (!e.target.closest('.col-color-popup') && !e.target.closest('.col-color-btn')) {
+    document.querySelectorAll('.col-color-popup.open').forEach(p => p.classList.remove('open'));
+  }
+});
 
 // ── Alert filter (Columns tab) ────────────────────────────────────────────────
 

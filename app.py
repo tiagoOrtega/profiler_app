@@ -1271,14 +1271,18 @@ def api_correxp_saved():
 
 def _run_featimp_job(
     job_id: str, db: str, schema: str, table: str,
-    target_col: str, sample_size: int,
+    target_col: str, feature_ids: list, sample_size: int,
 ) -> None:
     _featimp_jobs[job_id]["status"] = "running"
     try:
-        cfg     = _cfg()
-        result  = FeatureSelector(
+        cfg    = _cfg()
+        result = FeatureSelector(
             _get_platform(cfg), _reports_dir(cfg)
-        ).analyze(db, schema, table, target_col, sample_size=sample_size)
+        ).analyze(
+            db, schema, table, target_col,
+            feature_ids=feature_ids or None,
+            sample_size=sample_size,
+        )
         _featimp_jobs[job_id].update({"status": "done", **result})
     except Exception as exc:
         _featimp_jobs[job_id].update({"status": "error", "error": str(exc)})
@@ -1291,6 +1295,7 @@ def api_feature_importance():
     schema      = body.get("schema",      "").strip()
     table       = body.get("table",       "").strip()
     target_col  = body.get("target_col",  "").strip()
+    feature_ids = body.get("feature_ids", [])    # engineered IDs from frontend
     sample_size = int(body.get("sample_size", 8_000))
 
     if not all([db, schema, table, target_col]):
@@ -1300,7 +1305,7 @@ def api_feature_importance():
     _featimp_jobs[job_id] = {"status": "pending", "error": None}
     threading.Thread(
         target=_run_featimp_job,
-        args=(job_id, db, schema, table, target_col, sample_size),
+        args=(job_id, db, schema, table, target_col, feature_ids, sample_size),
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id})
@@ -1312,6 +1317,45 @@ def api_feature_importance_status(job_id: str):
     if not job:
         return jsonify({"error": "not found"}), 404
     return jsonify(job)
+
+
+# ── Column colour tagging ─────────────────────────────────────────────────────
+
+def _colors_path(cfg, db: str, schema: str, table: str) -> Path:
+    d = _reports_dir(cfg) / "colors"
+    d.mkdir(exist_ok=True)
+    key = f"{db.upper()}__{schema.upper()}__{table.upper()}"
+    return d / f"{key}.json"
+
+
+@app.route("/api/columns/colors")
+def api_columns_colors_get():
+    db     = request.args.get("db",     "").strip().upper()
+    schema = request.args.get("schema", "").strip().upper()
+    table  = request.args.get("table",  "").strip().upper()
+    if not all([db, schema, table]):
+        return jsonify({"error": "db, schema, table required"}), 400
+    p = _colors_path(_cfg(), db, schema, table)
+    if p.exists():
+        with open(p) as f:
+            return jsonify(json.load(f))
+    return jsonify({})
+
+
+@app.route("/api/columns/colors", methods=["POST"])
+def api_columns_colors_set():
+    body   = request.get_json(silent=True) or {}
+    db     = body.get("database", "").strip()
+    schema = body.get("schema",   "").strip()
+    table  = body.get("table",    "").strip()
+    colors = body.get("colors",   {})
+    if not all([db, schema, table]):
+        return jsonify({"error": "database, schema, table required"}), 400
+    cfg = _cfg()
+    p   = _colors_path(cfg, db.upper(), schema.upper(), table.upper())
+    with open(p, "w") as f:
+        json.dump(colors, f, indent=2)
+    return jsonify({"ok": True, "saved": len(colors)})
 
 
 if __name__ == "__main__":
