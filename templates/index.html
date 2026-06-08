@@ -102,11 +102,23 @@
           <td class="text-muted" style="font-size:12px;">
             {{ r.profiled_at[:16]|replace('T',' ') }}
           </td>
-          <td class="text-end">
+          <td class="text-end" style="white-space:nowrap;">
             <a href="{{ url_for('report_page', db=r.database, schema=r.schema, table=r.table) }}"
-               class="btn btn-sm btn-outline-secondary">
+               class="btn btn-sm btn-outline-secondary me-1" title="View Report">
               <i class="bi bi-bar-chart-line"></i>
             </a>
+            <button class="btn btn-sm btn-outline-secondary"
+                    title="Generate AI comments for this table"
+                    onclick="dashGenComments(this,'{{ r.database }}','{{ r.schema }}','{{ r.table }}')"
+                    data-db="{{ r.database }}" data-schema="{{ r.schema }}" data-table="{{ r.table }}">
+              <i class="bi bi-stars"></i>
+            </button>
+          </td>
+        </tr>
+        <!-- inline comment status row (hidden until triggered) -->
+        <tr id="cmt-{{ loop.index }}" style="display:none;">
+          <td colspan="6" style="padding:6px 14px; background:var(--bg3);">
+            <div id="cmt-body-{{ loop.index }}" style="font-size:11px; color:var(--muted);"></div>
           </td>
         </tr>
         {% endfor %}
@@ -134,10 +146,63 @@ function filterSource(src, btn) {
   });
   btn.classList.remove('btn-outline-secondary');
   btn.classList.add('active-filter', 'btn-primary');
-
-  document.querySelectorAll('#profilesTable tbody tr').forEach(tr => {
+  document.querySelectorAll('#profilesTable tbody tr[data-source]').forEach(tr => {
     tr.style.display = (!src || tr.dataset.source === src) ? '' : 'none';
   });
+}
+
+// ── Dashboard: generate comments for a profiled table ─────────────────────────
+async function dashGenComments(btn, db, schema, table) {
+  // Find the status row that follows this data row
+  const dataRow = btn.closest('tr[data-source]');
+  const nextRow = dataRow?.nextElementSibling;          // the cmt-N row
+  const body    = nextRow?.querySelector('[id^="cmt-body-"]');
+  if (!nextRow || !body) return;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  nextRow.style.display = '';
+  body.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>
+    Generating comments for <b>${schema}.${table}</b>…`;
+
+  let jobId;
+  try {
+    const d = await apiFetch('/api/comments/generate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ database: db, schema, table }),
+    });
+    jobId = d.job_id;
+  } catch (e) {
+    body.innerHTML = `<i class="bi bi-x-circle me-1" style="color:var(--red);"></i>${e.message}`;
+    btn.disabled = false; btn.innerHTML = '<i class="bi bi-stars"></i>';
+    return;
+  }
+
+  const poll = setInterval(async () => {
+    try {
+      const job = await apiFetch(`/api/comments/generate/${jobId}`);
+      if (job.status === 'done') {
+        clearInterval(poll);
+        const src   = job.rule_based ? 'rule-based' : `${job.provider}: ${job.model}`;
+        const ncols = Object.keys(job.column_comments || {}).length;
+        body.innerHTML =
+          `<i class="bi bi-check-circle me-1" style="color:var(--green);"></i>
+           <b>${ncols} columns</b> commented
+           <span class="badge ms-1" style="background:var(--border2);color:var(--muted);
+                 font-weight:400;">${src}</span>
+           &nbsp;—&nbsp;
+           <a href="/report?db=${encodeURIComponent(db)}&schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}"
+              style="font-size:11px;">Review &amp; Apply in Report →</a>`;
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check-circle" style="color:var(--green);"></i>';
+        btn.title     = 'Comments ready — click to re-generate';
+      } else if (job.status === 'error') {
+        clearInterval(poll);
+        body.innerHTML = `<i class="bi bi-x-circle me-1" style="color:var(--red);"></i>${job.error}`;
+        btn.disabled = false; btn.innerHTML = '<i class="bi bi-stars"></i>';
+      }
+    } catch { clearInterval(poll); btn.disabled = false; }
+  }, 1500);
 }
 </script>
 <style>

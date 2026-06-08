@@ -1,0 +1,31 @@
+{
+  "table_comment": "Fact table for organic sales, containing key sales data with FKs to customer, product, and store dimensions.",
+  "column_comments": {
+    "SALE_KEY": "Unique sale identifier (1-120000)",
+    "DATE_KEY": "Date of sale (2023-01-01 - 2024-12-31)",
+    "CUSTOMER_KEY": "Customer ID (1-3000)",
+    "PRODUCT_KEY": "Product ID (1-800)",
+    "STORE_KEY": "Store ID (1-200)",
+    "EMPLOYEE_KEY": "Employee ID (1-600)",
+    "PROMOTION_KEY": "Promotion ID (1-200)",
+    "CHANNEL_KEY": "Sales channel (1-5)",
+    "TRANSACTION_ID": "Transaction record identifier (text, 13 chars)",
+    "PAYMENT_METHOD": "Payment method used (text, 9 chars)",
+    "QUANTITY": "Quantity sold (1-6)",
+    "UNIT_PRICE": "Unit price of sale (2.34 - 2811.06 USD)",
+    "UNIT_COST": "Unit cost of sale (2.0 - 1373.0 USD)",
+    "DISCOUNT_AMOUNT": "Discount amount applied (0.0 - 9085.83 USD)",
+    "GROSS_AMOUNT": "Gross sales amount (2.34 - 16866.36 USD)",
+    "NET_AMOUNT": "Net sales amount (1.12 - 16866.36 USD)",
+    "TAX_AMOUNT": "Tax amount collected (0.09 - 1349.31 USD)",
+    "MARGIN_AMOUNT": "Sales margin (0.17 - 8718.36 USD)",
+    "IS_WEEKEND": "Indicates if sale occurred on a weekend (TRUE/FALSE)",
+    "IS_HOLIDAY": "Indicates if sale occurred on a holiday (TRUE/FALSE)",
+    "SEASON": "Seasonal category (text, 5 chars)"
+  },
+  "rule_based": false,
+  "provider": "ollama",
+  "model": "llama3.2",
+  "errors": [],
+  "generated_at": "2026-06-08T13:28:00.320510"
+}

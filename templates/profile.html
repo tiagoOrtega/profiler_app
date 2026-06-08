@@ -2,79 +2,235 @@
 {% block title %} — Run Profile{% endblock %}
 
 {% block content %}
-<div class="d-flex align-items-center mb-4">
+<style>
+/* ── Combobox ──────────────────────────────────────────────────── */
+.cb-wrap       { position:relative; }
+.cb-row        { display:flex; align-items:center; gap:6px;
+                 border:1px solid var(--border); border-radius:6px;
+                 background:var(--bg); padding:7px 10px;
+                 cursor:text; transition:border-color .12s; }
+.cb-row:focus-within { border-color:var(--accent);
+                        box-shadow:0 0 0 3px rgba(88,166,255,.12); }
+.cb-row.cb-loading { border-color:var(--muted); }
+.cb-icon       { color:var(--muted); font-size:14px; flex-shrink:0; }
+.cb-input      { flex:1; background:none; border:none; color:var(--text);
+                 outline:none; font-size:13px; min-width:0; }
+.cb-input::placeholder { color:#484f58; }
+.cb-count      { font-size:10px; color:var(--muted); white-space:nowrap;
+                 flex-shrink:0; }
+.cb-chevron    { background:none; border:none; color:var(--muted);
+                 padding:0 2px; cursor:pointer; flex-shrink:0;
+                 transition:transform .15s; }
+.cb-chevron.open { transform:rotate(180deg); }
+
+.cb-dropdown   { position:absolute; top:calc(100% + 4px); left:0; right:0;
+                 z-index:200; background:var(--bg2);
+                 border:1px solid var(--border2); border-radius:7px;
+                 box-shadow:0 8px 24px rgba(0,0,0,.35);
+                 max-height:260px; overflow-y:auto; display:none; }
+.cb-dropdown.open { display:block; }
+
+.cb-search-row { padding:8px 10px; border-bottom:1px solid var(--border2);
+                 display:flex; align-items:center; gap:6px; }
+.cb-search     { flex:1; background:none; border:none; color:var(--text);
+                 outline:none; font-size:12px; }
+
+.cb-item       { padding:8px 14px; cursor:pointer; font-size:13px;
+                 display:flex; align-items:center; gap:8px;
+                 transition:background .08s; }
+.cb-item:hover, .cb-item.hi { background:var(--border2); }
+.cb-item.sel   { color:var(--accent); }
+.cb-item .cb-item-label { flex:1; }
+.cb-item .cb-item-meta  { font-size:11px; color:var(--muted); }
+
+.cb-state      { padding:12px 14px; font-size:12px; color:var(--muted);
+                 text-align:center; }
+
+/* ── Step indicator ──────────────────────────────────────────────── */
+.step-row      { display:flex; align-items:flex-start; gap:12px; }
+.step-num      { width:24px; height:24px; border-radius:50%; flex-shrink:0;
+                 display:flex; align-items:center; justify-content:center;
+                 font-size:11px; font-weight:700; margin-top:2px; }
+.step-num.done { background:var(--green);   color:#000; }
+.step-num.active { background:var(--accent); color:#000; }
+.step-num.idle   { background:var(--border2); color:var(--muted); }
+.step-line     { flex:1; min-width:0; }
+.step-label    { font-size:11px; font-weight:600; text-transform:uppercase;
+                 letter-spacing:.05em; color:var(--muted); margin-bottom:6px; }
+
+/* ── Recent table pills ──────────────────────────────────────────── */
+.recent-pill   { display:inline-flex; align-items:center; gap:6px;
+                 padding:4px 10px; border:1px solid var(--border2);
+                 border-radius:5px; font-size:11px; cursor:pointer;
+                 transition:all .1s; }
+.recent-pill:hover { border-color:var(--accent); background:rgba(88,166,255,.06); }
+.recent-pill code  { color:var(--text); font-size:11px; }
+
+/* ── Progress bar ────────────────────────────────────────────────── */
+.prog-bar-wrap { height:3px; background:var(--border2); border-radius:2px; overflow:hidden; }
+.prog-bar-fill { height:3px; background:var(--accent); border-radius:2px;
+                 width:0%; transition:width .4s; }
+</style>
+
+<!-- ── Page header ─────────────────────────────────────────────────── -->
+<div class="d-flex align-items-start mb-4 gap-3 flex-wrap">
   <div>
     <h5 class="mb-1"><i class="bi bi-play-circle me-2"></i>Run Profile</h5>
-    <small class="text-muted">Compute statistics for a single table in Snowflake</small>
+    <small class="text-muted">
+      Compute column statistics for any table on
+      {% set _pi = {'snowflake':'bi-snow3','sqlite':'bi-file-earmark-zip','databricks':'bi-lightning-charge'} %}
+      <i class="bi {{ _pi.get(cfg.platform,'bi-database') }} me-1" style="color:var(--accent);"></i>
+      <b>{{ cfg.source_name or 'My Source' }}</b>
+    </small>
   </div>
 </div>
 
 <div class="row g-4">
 
-  <!-- Selector form -->
-  <div class="col-md-5">
-    <div class="card">
-      <div class="card-header"><i class="bi bi-search"></i> Select Table</div>
-      <div class="card-body d-flex flex-column gap-3">
+  <!-- ── Left: selector ──────────────────────────────────────────── -->
+  <div class="col-lg-5">
 
-        <div>
-          <label class="form-label">Database</label>
-          <div class="input-group">
-            <input type="text" id="db" class="form-control"
-                   value="{{ cfg.snowflake.database }}" placeholder="MY_DATABASE">
-            <button class="btn btn-outline-secondary" type="button"
-                    title="Load schemas" onclick="loadSchemas()">
-              <i class="bi bi-arrow-clockwise"></i>
-            </button>
+    <!-- Step 1: Database -->
+    <div class="step-row mb-3">
+      <div class="step-num active" id="step1-num">1</div>
+      <div class="step-line">
+        <div class="step-label">Database</div>
+        <div class="cb-wrap" id="cb-db-wrap">
+          <div class="cb-row">
+            <i class="bi bi-server cb-icon"></i>
+            <input type="text" id="db" class="cb-input"
+                   value="{{ cfg.snowflake.database if cfg.platform == 'snowflake'
+                              else (cfg.databricks.catalog if cfg.platform == 'databricks'
+                              else 'local') }}"
+                   placeholder="DATABASE_NAME"
+                   autocomplete="off"
+                   oninput="_onDbInput()"
+                   onblur="_onDbBlur()">
+            <span id="db-hint" class="cb-count"></span>
+          </div>
+          <div class="form-text mt-1" id="db-help" style="font-size:11px;">
+            {% if cfg.platform == 'sqlite' %}
+              SQLite: database is the configured <code>.db</code> file — leave as <code>local</code>.
+            {% elif cfg.platform == 'databricks' %}
+              Enter the Unity Catalog name (e.g. <code>main</code>).
+            {% else %}
+              Snowflake database name. Press Enter or Tab to load schemas.
+            {% endif %}
           </div>
         </div>
-
-        <div>
-          <label class="form-label">Schema</label>
-          <input type="text" id="schema" class="form-control"
-                 value="{{ cfg.snowflake.schema }}" placeholder="PUBLIC"
-                 oninput="document.getElementById('schemaSelect').value='';">
-          <select id="schemaSelect" class="form-select mt-1" style="display:none;"
-                  onchange="if(this.value){document.getElementById('schema').value=this.value; loadTables();}">
-            <option value="">— select schema —</option>
-          </select>
-        </div>
-
-        <div>
-          <label class="form-label">Table</label>
-          <div class="input-group">
-            <input type="text" id="table" class="form-control" placeholder="MY_TABLE"
-                   oninput="document.getElementById('tableSelect').value='';">
-            <button class="btn btn-outline-secondary" type="button"
-                    title="Load tables" onclick="loadTables()">
-              <i class="bi bi-arrow-clockwise"></i>
-            </button>
-          </div>
-          <select id="tableSelect" class="form-select mt-1" style="display:none;"
-                  onchange="if(this.value) document.getElementById('table').value=this.value;">
-            <option value="">— select table —</option>
-          </select>
-        </div>
-
-        <button id="profileBtn" type="button" class="btn btn-primary mt-1" onclick="startProfile()">
-          <i class="bi bi-play-fill me-1"></i> Profile Table
-        </button>
-
       </div>
     </div>
+
+    <!-- Step 2: Schema -->
+    <div class="step-row mb-3">
+      <div class="step-num idle" id="step2-num">2</div>
+      <div class="step-line">
+        <div class="step-label">Schema</div>
+        <div class="cb-wrap" id="cb-schema-wrap">
+          <div class="cb-row" id="cb-schema-row" onclick="_openCombo('schema')">
+            <i class="bi bi-layers cb-icon"></i>
+            <input type="text" id="schema" class="cb-input"
+                   placeholder="Select or type a schema…"
+                   autocomplete="off" readonly
+                   onfocus="_openCombo('schema')">
+            <span id="schema-count" class="cb-count"></span>
+            <button class="cb-chevron" id="schema-chevron" type="button"
+                    onclick="event.stopPropagation(); _toggleCombo('schema')">
+              <i class="bi bi-chevron-down" style="font-size:12px;"></i>
+            </button>
+          </div>
+          <div class="cb-dropdown" id="schema-dropdown">
+            <div class="cb-search-row">
+              <i class="bi bi-search" style="font-size:12px;color:var(--muted);"></i>
+              <input type="text" class="cb-search" id="schema-search"
+                     placeholder="Filter schemas…"
+                     oninput="_filterCombo('schema', this.value)">
+            </div>
+            <div id="schema-items"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Table -->
+    <div class="step-row mb-4">
+      <div class="step-num idle" id="step3-num">3</div>
+      <div class="step-line">
+        <div class="step-label">Table</div>
+        <div class="cb-wrap" id="cb-table-wrap">
+          <div class="cb-row" id="cb-table-row" onclick="_openCombo('table')">
+            <i class="bi bi-table cb-icon"></i>
+            <input type="text" id="table" class="cb-input"
+                   placeholder="Select or type a table…"
+                   autocomplete="off" readonly
+                   onfocus="_openCombo('table')">
+            <span id="table-count" class="cb-count"></span>
+            <button class="cb-chevron" id="table-chevron" type="button"
+                    onclick="event.stopPropagation(); _toggleCombo('table')">
+              <i class="bi bi-chevron-down" style="font-size:12px;"></i>
+            </button>
+          </div>
+          <div class="cb-dropdown" id="table-dropdown">
+            <div class="cb-search-row">
+              <i class="bi bi-search" style="font-size:12px;color:var(--muted);"></i>
+              <input type="text" class="cb-search" id="table-search"
+                     placeholder="Filter tables…"
+                     oninput="_filterCombo('table', this.value)">
+            </div>
+            <div id="table-items"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Profile button -->
+    <button id="profileBtn" type="button" class="btn btn-primary w-100"
+            onclick="startProfile()">
+      <i class="bi bi-play-fill me-1"></i>Profile Table
+      <span style="font-size:10px; opacity:.7; margin-left:6px;">Ctrl+Enter</span>
+    </button>
+
+    <!-- Recently profiled -->
+    {% if recent %}
+    <div class="mt-4">
+      <div style="font-size:10px; font-weight:700; text-transform:uppercase;
+                  letter-spacing:.05em; color:var(--muted); margin-bottom:8px;">
+        <i class="bi bi-clock-history me-1"></i>Recently Profiled
+      </div>
+      <div class="d-flex flex-wrap gap-2">
+        {% for r in recent %}
+        <div class="recent-pill"
+             onclick="quickSelect('{{ r.db }}','{{ r.schema }}','{{ r.table }}')"
+             title="Profiled {{ r.profiled_at }}{% if r.row_count %} · {{ '{:,}'.format(r.row_count) }} rows{% endif %}">
+          {% set _pi2 = {'snowflake':'bi-snow3','sqlite':'bi-file-earmark-zip','databricks':'bi-lightning-charge'} %}
+          <i class="bi {{ _pi2.get(r.platform,'bi-database') }}"
+             style="color:var(--muted);font-size:11px;"></i>
+          <code>{{ r.schema }}.{{ r.table }}</code>
+          {% if r.row_count %}
+          <span style="color:var(--muted);">{{ '{:,}'.format(r.row_count) }}</span>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
   </div>
 
-  <!-- Progress / result -->
-  <div class="col-md-7">
+  <!-- ── Right: progress / result ───────────────────────────────── -->
+  <div class="col-lg-7">
 
-    <!-- Hint (shown initially) -->
-    <div id="hintPanel" class="card" style="border-style:dashed; border-color:var(--border);">
-      <div class="card-body text-center py-5 text-muted">
-        <i class="bi bi-bar-chart-line" style="font-size:3rem; opacity:.3;"></i>
-        <p class="mt-3 mb-1">Choose a database, schema and table, then click <b>Profile Table</b>.</p>
-        <p class="mb-0" style="font-size:12px;">
-          Results are saved to <code>{{ cfg.output_dir }}/</code> and viewable as HTML reports.<br>
-          Profiling runs queries directly in Snowflake — no data is transferred.
+    <!-- Hint -->
+    <div id="hintPanel" class="card h-100" style="border-style:dashed; min-height:200px;">
+      <div class="card-body d-flex flex-column align-items-center justify-content-center
+                  text-center py-5 text-muted">
+        <i class="bi bi-bar-chart-line" style="font-size:2.5rem; opacity:.25;"></i>
+        <p class="mt-3 mb-1" style="font-size:14px;">
+          Select a table on the left, then click <b>Profile Table</b>.
+        </p>
+        <p class="mb-0" style="font-size:12px; color:var(--muted); max-width:360px;">
+          All statistics are computed directly in the warehouse — no data leaves the source.
+          Results are saved to <code>{{ cfg.output_dir }}/</code> for report viewing.
         </p>
       </div>
     </div>
@@ -82,10 +238,18 @@
     <!-- Running -->
     <div id="progressPanel" style="display:none;">
       <div class="card">
-        <div class="card-header"><i class="bi bi-hourglass-split"></i> Profiling…</div>
-        <div class="card-body text-center py-4">
-          <div class="spinner-border text-primary mb-3" role="status" style="width:2rem;height:2rem;"></div>
-          <p id="progressText" class="mb-0 text-muted" style="font-size:12px;"></p>
+        <div class="card-header">
+          <span class="spinner-border spinner-border-sm me-2 text-primary"></span>
+          Profiling…
+        </div>
+        <div class="card-body" style="padding:20px 24px;">
+          <div id="progressText" class="text-muted mb-3" style="font-size:12px;"></div>
+          <div class="prog-bar-wrap">
+            <div class="prog-bar-fill" id="progressBar"></div>
+          </div>
+          <div class="mt-3" style="font-size:11px; color:var(--muted);">
+            Profiling queries each column individually — large tables may take 30–120 s.
+          </div>
         </div>
       </div>
     </div>
@@ -93,31 +257,68 @@
     <!-- Done -->
     <div id="resultPanel" style="display:none;">
       <div class="card">
-        <div class="card-header" style="color:var(--green);"><i class="bi bi-check-circle"></i> Profile Complete</div>
-        <div class="card-body">
-          <table class="table table-sm mb-3">
-            <tbody>
-              <tr><td class="text-muted">Table</td>   <td id="resTable" style="font-family:monospace;"></td></tr>
-              <tr><td class="text-muted">Rows</td>    <td id="resRows"></td></tr>
-              <tr><td class="text-muted">Columns</td> <td id="resCols"></td></tr>
-              <tr><td class="text-muted">Alerts</td>  <td id="resAlerts"></td></tr>
-            </tbody>
-          </table>
-          <a id="reportLink" href="#" class="btn btn-primary w-100">
-            <i class="bi bi-bar-chart-line me-1"></i> View Full Report
-          </a>
+        <div class="card-header" style="color:var(--green);">
+          <i class="bi bi-check-circle me-1"></i>Profile Complete
+        </div>
+        <div class="card-body" style="padding:20px 24px;">
+          <div class="row g-3 mb-4">
+            <div class="col-6">
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;
+                          color:var(--muted);margin-bottom:4px;">Table</div>
+              <code id="resTable" style="font-size:12px;color:var(--text);word-break:break-all;"></code>
+            </div>
+            <div class="col-3">
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;
+                          color:var(--muted);margin-bottom:4px;">Rows</div>
+              <b id="resRows" style="font-size:16px;"></b>
+            </div>
+            <div class="col-3">
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;
+                          color:var(--muted);margin-bottom:4px;">Columns</div>
+              <b id="resCols" style="font-size:16px;"></b>
+            </div>
+            <div class="col-6">
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;
+                          color:var(--muted);margin-bottom:4px;">Alerts</div>
+              <span id="resAlerts"></span>
+            </div>
+            <div class="col-6">
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;
+                          color:var(--muted);margin-bottom:4px;">Errors</div>
+              <span id="resErrors"></span>
+            </div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <a id="reportLink" href="#" class="btn btn-primary flex-fill">
+              <i class="bi bi-bar-chart-line me-1"></i>View Report
+            </a>
+            <button id="genCommentBtn" type="button" class="btn btn-outline-secondary"
+                    onclick="genComments()" title="Auto-generate table & column comments using AI">
+              <i class="bi bi-stars me-1"></i>Generate Comments
+            </button>
+            <button type="button" class="btn btn-outline-secondary"
+                    onclick="resetForm()">
+              <i class="bi bi-arrow-repeat me-1"></i>Profile Another
+            </button>
+          </div>
+          <!-- Comment generation status -->
+          <div id="commentStatus" class="mt-3" style="display:none; font-size:12px;"></div>
         </div>
       </div>
     </div>
 
     <!-- Error -->
     <div id="errorPanel" style="display:none;">
-      <div class="alert alert-danger d-flex gap-2 align-items-start mb-0">
-        <i class="bi bi-x-octagon-fill mt-1"></i>
-        <div>
-          <b>Profiling failed</b><br>
-          <span id="errorText" style="font-size:12px;"></span>
+      <div class="alert alert-danger" style="border-radius:8px;">
+        <div class="d-flex align-items-start gap-2">
+          <i class="bi bi-x-octagon-fill mt-1"></i>
+          <div>
+            <b>Profiling failed</b>
+            <div id="errorText" class="mt-1" style="font-size:12px;"></div>
+          </div>
         </div>
+        <button class="btn btn-sm btn-outline-secondary mt-2"
+                onclick="showPanel('hintPanel')">Try again</button>
       </div>
     </div>
 
@@ -127,103 +328,409 @@
 
 {% block scripts %}
 <script>
-// Pre-fill from query string (used by "Re-profile" link on report page)
+// ── State ─────────────────────────────────────────────────────────────────────
+const _state = {
+  schema: { items: [], filtered: [], selected: '', loading: false },
+  table:  { items: [], filtered: [], selected: '', loading: false },
+};
+
+// ── Pre-fill from query string (Re-profile link) ──────────────────────────────
 (function () {
   const p = new URLSearchParams(location.search);
   if (p.get('db'))     document.getElementById('db').value     = p.get('db');
-  if (p.get('schema')) document.getElementById('schema').value = p.get('schema');
-  if (p.get('table'))  document.getElementById('table').value  = p.get('table');
+  if (p.get('schema')) _selectItem('schema', p.get('schema'), false);
+  if (p.get('table'))  setTimeout(() => _selectItem('table', p.get('table'), false), 100);
+  if (p.get('db') || p.get('schema')) _stepDone(1);
+  if (p.get('schema')) _stepDone(2);
+  if (p.get('table'))  _stepDone(3);
 })();
 
-async function loadSchemas() {
-  const db = document.getElementById('db').value.trim();
+// ── Combobox core ─────────────────────────────────────────────────────────────
+
+function _openCombo(name) {
+  const dd = document.getElementById(`${name}-dropdown`);
+  const ch = document.getElementById(`${name}-chevron`);
+  if (!dd || !_state[name].items.length && !_state[name].loading) return;
+  dd.classList.add('open');
+  if (ch) ch.classList.add('open');
+  // Clear search and refocus
+  const s = document.getElementById(`${name}-search`);
+  if (s) { s.value = ''; s.focus(); _filterCombo(name, ''); }
+}
+
+function _closeCombo(name) {
+  const dd = document.getElementById(`${name}-dropdown`);
+  const ch = document.getElementById(`${name}-chevron`);
+  if (dd) dd.classList.remove('open');
+  if (ch) ch.classList.remove('open');
+}
+
+function _toggleCombo(name) {
+  const dd = document.getElementById(`${name}-dropdown`);
+  if (dd?.classList.contains('open')) _closeCombo(name);
+  else _openCombo(name);
+}
+
+// Close combos when clicking outside
+document.addEventListener('click', e => {
+  ['schema', 'table'].forEach(name => {
+    const wrap = document.getElementById(`cb-${name}-wrap`);
+    if (wrap && !wrap.contains(e.target)) _closeCombo(name);
+  });
+});
+
+function _filterCombo(name, query) {
+  const st = _state[name];
+  const q  = query.toLowerCase().trim();
+  st.filtered = q ? st.items.filter(it => it.toLowerCase().includes(q)) : [...st.items];
+  _renderItems(name);
+}
+
+function _renderItems(name) {
+  const el   = document.getElementById(`${name}-items`);
+  const st   = _state[name];
+  if (!el) return;
+
+  if (st.loading) {
+    el.innerHTML = `<div class="cb-state">
+      <span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>`;
+    return;
+  }
+  if (!st.items.length) {
+    el.innerHTML = `<div class="cb-state">No ${name}s found</div>`;
+    return;
+  }
+  if (!st.filtered.length) {
+    el.innerHTML = `<div class="cb-state">No matches</div>`;
+    return;
+  }
+
+  el.innerHTML = st.filtered.map(it => {
+    const isSel = it === st.selected;
+    return `<div class="cb-item${isSel ? ' sel' : ''}"
+                onclick="_selectItem('${name}', '${it.replace(/'/g,"\\'")}')">
+      <i class="bi ${name === 'schema' ? 'bi-layers' : 'bi-table'}
+         ${isSel ? '' : 'text-muted'}" style="font-size:12px;"></i>
+      <span class="cb-item-label">${it}</span>
+    </div>`;
+  }).join('');
+}
+
+function _selectItem(name, value, trigger = true) {
+  const input = document.getElementById(name);
+  if (!input) return;
+  _state[name].selected = value;
+  input.value = value;
+  _closeCombo(name);
+
+  if (name === 'schema') {
+    _stepDone(2);
+    // Reset table
+    _state.table = { items: [], filtered: [], selected: '', loading: false };
+    document.getElementById('table').value = '';
+    document.getElementById('table-count').textContent = '';
+    _renderItems('table');
+    _stepActive(3);
+    if (trigger && value) _loadTables(value);
+  }
+  if (name === 'table') {
+    _stepDone(3);
+  }
+}
+
+function _setLoading(name, bool) {
+  _state[name].loading = bool;
+  _renderItems(name);
+  const row = document.getElementById(`cb-${name}-row`);
+  if (row) row.classList.toggle('cb-loading', bool);
+}
+
+// ── Load schemas ──────────────────────────────────────────────────────────────
+
+async function _loadSchemas(db) {
   if (!db) return;
+  _setLoading('schema', true);
+  _openCombo('schema');
+  _stepActive(2);
   try {
-    const d = await (await fetch(`/api/schemas?database=${encodeURIComponent(db)}`)).json();
-    if (d.schemas && d.schemas.length) {
-      const sel = document.getElementById('schemaSelect');
-      sel.innerHTML = '<option value="">— select schema —</option>' +
-        d.schemas.map(s => `<option value="${s}">${s}</option>`).join('');
-      sel.style.display = '';
-    }
+    const d = await apiFetch(`/api/schemas?database=${encodeURIComponent(db)}`);
+    _state.schema.items    = d.schemas || [];
+    _state.schema.filtered = [..._state.schema.items];
+    const countEl = document.getElementById('schema-count');
+    if (countEl) countEl.textContent =
+      _state.schema.items.length ? `${_state.schema.items.length} schemas` : '';
+    _setLoading('schema', false);
+    _renderItems('schema');
+    // Auto-select if only one
+    if (_state.schema.items.length === 1) _selectItem('schema', _state.schema.items[0]);
+  } catch (e) {
+    _setLoading('schema', false);
+    const el = document.getElementById('schema-items');
+    if (el) el.innerHTML = `<div class="cb-state" style="color:var(--red);">${e.message}</div>`;
+  }
+}
+
+async function _loadTables(schema) {
+  const db = document.getElementById('db').value.trim();
+  if (!db || !schema) return;
+  _setLoading('table', true);
+  _openCombo('table');
+  try {
+    const d = await apiFetch(`/api/tables?database=${encodeURIComponent(db)}&schema=${encodeURIComponent(schema)}`);
+    _state.table.items    = d.tables || [];
+    _state.table.filtered = [..._state.table.items];
+    const countEl = document.getElementById('table-count');
+    if (countEl) countEl.textContent =
+      _state.table.items.length ? `${_state.table.items.length} tables` : '';
+    _setLoading('table', false);
+    _renderItems('table');
+    // Auto-select if only one
+    if (_state.table.items.length === 1) _selectItem('table', _state.table.items[0]);
+  } catch (e) {
+    _setLoading('table', false);
+    const el = document.getElementById('table-items');
+    if (el) el.innerHTML = `<div class="cb-state" style="color:var(--red);">${e.message}</div>`;
+  }
+}
+
+// ── DB field events ───────────────────────────────────────────────────────────
+
+function _onDbInput() {
+  // Reset schema + table when DB changes
+  _state.schema = { items: [], filtered: [], selected: '', loading: false };
+  _state.table  = { items: [], filtered: [], selected: '', loading: false };
+  document.getElementById('schema').value = '';
+  document.getElementById('table').value  = '';
+  document.getElementById('schema-count').textContent = '';
+  document.getElementById('table-count').textContent  = '';
+  _stepActive(1);
+}
+
+function _onDbBlur() {
+  const db = document.getElementById('db').value.trim();
+  if (db && !_state.schema.items.length) {
+    _stepDone(1);
+    _loadSchemas(db);
+  }
+}
+
+// Trigger schema load on Enter/Tab in DB field
+document.addEventListener('DOMContentLoaded', () => {
+  const dbInput = document.getElementById('db');
+  if (dbInput) {
+    dbInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        _onDbBlur();
+      }
+    });
+  }
+  // Auto-load schemas if DB is pre-filled
+  const db = dbInput?.value?.trim();
+  if (db) { _stepDone(1); _loadSchemas(db); }
+});
+
+// ── Step indicator helpers ─────────────────────────────────────────────────────
+
+function _stepDone(n) {
+  const el = document.getElementById(`step${n}-num`);
+  if (!el) return;
+  el.className = 'step-num done';
+  el.innerHTML = '<i class="bi bi-check-lg" style="font-size:11px;"></i>';
+}
+function _stepActive(n) {
+  const el = document.getElementById(`step${n}-num`);
+  if (!el) return;
+  el.className = 'step-num active';
+  el.textContent = n;
+}
+
+// ── Quick-select from recently profiled ───────────────────────────────────────
+
+async function quickSelect(db, schema, table) {
+  document.getElementById('db').value = db;
+  _stepDone(1);
+  // Load schemas silently, then set schema, then load tables, then set table
+  try {
+    const sd = await apiFetch(`/api/schemas?database=${encodeURIComponent(db)}`);
+    _state.schema.items    = sd.schemas || [];
+    _state.schema.filtered = [..._state.schema.items];
+    const sc = document.getElementById('schema-count');
+    if (sc) sc.textContent = _state.schema.items.length ? `${_state.schema.items.length} schemas` : '';
+    _selectItem('schema', schema, false);
+    _stepDone(2);
+  } catch {}
+  try {
+    const td = await apiFetch(`/api/tables?database=${encodeURIComponent(db)}&schema=${encodeURIComponent(schema)}`);
+    _state.table.items    = td.tables || [];
+    _state.table.filtered = [..._state.table.items];
+    const tc = document.getElementById('table-count');
+    if (tc) tc.textContent = _state.table.items.length ? `${_state.table.items.length} tables` : '';
+    _selectItem('table', table, false);
+    _stepDone(3);
   } catch {}
 }
 
-async function loadTables() {
-  const db     = document.getElementById('db').value.trim();
-  const schema = document.getElementById('schema').value.trim();
-  if (!db || !schema) return;
-  try {
-    const d = await (await fetch(`/api/tables?database=${encodeURIComponent(db)}&schema=${encodeURIComponent(schema)}`)).json();
-    if (d.tables && d.tables.length) {
-      const sel = document.getElementById('tableSelect');
-      sel.innerHTML = '<option value="">— select table —</option>' +
-        d.tables.map(t => `<option value="${t}">${t}</option>`).join('');
-      sel.style.display = '';
-    }
-  } catch {}
-}
+// ── Profile action ────────────────────────────────────────────────────────────
 
 function showPanel(name) {
   ['hintPanel','progressPanel','resultPanel','errorPanel'].forEach(id => {
-    document.getElementById(id).style.display = id === name ? '' : 'none';
+    const el = document.getElementById(id);
+    if (el) el.style.display = id === name ? '' : 'none';
   });
 }
+
+function resetForm() {
+  showPanel('hintPanel');
+  document.getElementById('profileBtn').disabled = false;
+  // Don't clear selections — user may want to re-profile same table
+}
+
+// Keyboard shortcut: Ctrl+Enter
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') startProfile();
+});
 
 async function startProfile() {
   const db     = document.getElementById('db').value.trim();
   const schema = document.getElementById('schema').value.trim();
   const table  = document.getElementById('table').value.trim();
-  if (!db || !schema || !table) { alert('Fill in database, schema and table.'); return; }
+  if (!db || !schema || !table) {
+    const missing = !db ? 'database' : !schema ? 'schema' : 'table';
+    alert(`Please select a ${missing} first.`);
+    return;
+  }
 
   document.getElementById('profileBtn').disabled = true;
-  document.getElementById('progressText').textContent = `Profiling ${db}.${schema}.${table}…`;
+  document.getElementById('progressText').textContent = `${db}.${schema}.${table}`;
+  // Animate progress bar
+  const bar = document.getElementById('progressBar');
+  if (bar) { bar.style.width = '0%'; setTimeout(() => { bar.style.width = '70%'; }, 100); }
   showPanel('progressPanel');
 
   let jobId;
   try {
-    const r = await fetch('/api/profile', {
+    const d = await apiFetch('/api/profile', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ database: db, schema, table }),
     });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
     jobId = d.job_id;
-  } catch (e) { showError(e.message); return; }
+  } catch (e) { _showError(e.message); return; }
 
   const poll = setInterval(async () => {
     try {
-      const job = await (await fetch(`/api/profile/${jobId}`)).json();
+      const job = await apiFetch(`/api/profile/${jobId}`);
       if (job.status === 'done') {
         clearInterval(poll);
-        showResult(job, db, schema, table);
+        if (bar) bar.style.width = '100%';
+        setTimeout(() => _showResult(job, db, schema, table), 300);
       } else if (job.status === 'error') {
         clearInterval(poll);
-        showError(job.error || 'Unknown error');
+        _showError(job.error || 'Unknown error');
       }
-    } catch (e) { clearInterval(poll); showError(e.message); }
+    } catch (e) { clearInterval(poll); _showError(e.message); }
   }, 1500);
 }
 
-function showResult(job, db, schema, table) {
+// Track the last profiled table so genComments() can reference it
+let _lastDb = '', _lastSchema = '', _lastTable = '';
+
+function _showResult(job, db, schema, table) {
+  _lastDb = db; _lastSchema = schema; _lastTable = table;
+
+  // Reset comment status for the new table
+  const cs = document.getElementById('commentStatus');
+  if (cs) cs.style.display = 'none';
+  const btn = document.getElementById('genCommentBtn');
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate Comments'; }
+
   document.getElementById('resTable').textContent = `${db}.${schema}.${table}`;
   document.getElementById('resRows').textContent  = (job.row_count ?? 0).toLocaleString();
   document.getElementById('resCols').textContent  = job.column_count ?? '—';
+
   const ac = job.alert_count || 0;
   document.getElementById('resAlerts').innerHTML = ac > 0
     ? `<span class="badge" style="background:var(--yellow);color:#000;">${ac} alert${ac!==1?'s':''}</span>`
     : `<span class="badge" style="background:var(--green);">none</span>`;
+
+  const ec = job.error_count || 0;
+  document.getElementById('resErrors').innerHTML = ec > 0
+    ? `<span class="badge" style="background:var(--red);">${ec} column${ec!==1?'s':''}</span>`
+    : `<span class="badge" style="background:var(--green);">none</span>`;
+
   document.getElementById('reportLink').href =
     `/report?db=${encodeURIComponent(db)}&schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`;
   document.getElementById('profileBtn').disabled = false;
   showPanel('resultPanel');
 }
 
-function showError(msg) {
+function _showError(msg) {
   document.getElementById('errorText').textContent = msg;
   document.getElementById('profileBtn').disabled = false;
   showPanel('errorPanel');
+}
+
+// ── Generate comments for the last profiled table ─────────────────────────────
+async function genComments() {
+  if (!_lastDb || !_lastSchema || !_lastTable) return;
+  const btn = document.getElementById('genCommentBtn');
+  const cs  = document.getElementById('commentStatus');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>';
+  cs.style.display = '';
+  cs.innerHTML = `<div style="padding:8px 12px; background:var(--bg3);
+    border:1px solid var(--border2); border-radius:6px; color:var(--muted);">
+    <span class="spinner-border spinner-border-sm me-2"></span>
+    Generating comments for <b>${_lastSchema}.${_lastTable}</b>…
+    <small>(uses AI Insights provider configured in Sources)</small>
+  </div>`;
+
+  let jobId;
+  try {
+    const d = await apiFetch('/api/comments/generate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ database: _lastDb, schema: _lastSchema, table: _lastTable }),
+    });
+    jobId = d.job_id;
+  } catch (e) {
+    cs.innerHTML = `<div class="alert alert-danger py-2 mb-0">
+      <i class="bi bi-x-circle me-1"></i>${e.message}</div>`;
+    btn.disabled = false; btn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate Comments';
+    return;
+  }
+
+  const poll = setInterval(async () => {
+    try {
+      const job = await apiFetch(`/api/comments/generate/${jobId}`);
+      if (job.status === 'done') {
+        clearInterval(poll);
+        const src   = job.rule_based ? 'rule-based' : `${job.provider}: ${job.model}`;
+        const ncols = Object.keys(job.column_comments || {}).length;
+        cs.innerHTML = `<div style="padding:10px 14px; background:rgba(63,185,80,.07);
+          border:1px solid rgba(63,185,80,.3); border-radius:6px; font-size:12px;">
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <i class="bi bi-check-circle" style="color:var(--green);"></i>
+            <b>Comments ready</b>
+            <span class="badge" style="background:var(--border2);color:var(--muted);font-weight:400;">${src}</span>
+            <span style="color:var(--muted);">${ncols} columns + table description</span>
+            <a href="/report?db=${encodeURIComponent(_lastDb)}&schema=${encodeURIComponent(_lastSchema)}&table=${encodeURIComponent(_lastTable)}#pane-columns"
+               class="btn btn-sm btn-outline-secondary ms-auto" style="font-size:11px;">
+              <i class="bi bi-eye me-1"></i>Review &amp; Apply in Report
+            </a>
+          </div>
+          ${job.errors?.length ? `<div class="mt-2 text-muted" style="font-size:11px;">
+            ⚠ ${job.errors.length} warning(s): ${job.errors[0]}</div>` : ''}
+        </div>`;
+        btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Re-generate';
+      } else if (job.status === 'error') {
+        clearInterval(poll);
+        cs.innerHTML = `<div class="alert alert-danger py-2 mb-0">
+          <i class="bi bi-x-circle me-1"></i>${job.error}</div>`;
+        btn.disabled = false; btn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate Comments';
+      }
+    } catch { clearInterval(poll); btn.disabled = false; }
+  }, 1500);
 }
 </script>
 {% endblock %}

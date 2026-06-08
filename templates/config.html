@@ -280,7 +280,104 @@
     </div>
   </div>
 
-  <!-- ── 4. Storage ────────────────────────────────────────────────────── -->
+  <!-- ── 4. AI Insights (LLM) ─────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-body" style="padding:20px 24px;">
+      {% set llm_raw = raw.get('llm', {}) %}
+      {% set cur_llm = llm_raw.get('provider', cfg.llm.provider if cfg.llm else 'disabled') %}
+      <div class="section-heading"><i class="bi bi-stars me-1"></i>AI Insights
+        <span id="llmStatusChip" style="font-size:10px; text-transform:none; letter-spacing:0;
+              margin-left:auto; padding:2px 8px; border-radius:3px;
+              background:var(--border2); color:var(--muted);">checking…</span>
+      </div>
+      <p style="font-size:12px; color:var(--muted); margin-bottom:14px;">
+        When enabled, each clustering run generates per-cluster summaries and
+        global business insights using the selected LLM. Results are saved and
+        displayed in the Clustering tab of every report.
+      </p>
+
+      <!-- Provider selector -->
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+        {% for pid, plabel, picon, pdesc in [
+          ('disabled',  'Disabled',   'bi-slash-circle',       'Rule-based fallback'),
+          ('ollama',    'Ollama',      'bi-hdd-network',        'Local — free'),
+          ('openai',    'OpenAI',      'bi-cloud',              'Cloud — GPT'),
+          ('anthropic', 'Anthropic',   'bi-robot',              'Cloud — Claude'),
+        ] %}
+        <label style="flex:1; min-width:110px;">
+          <input type="radio" name="llm_provider" value="{{ pid }}" class="d-none"
+                 {% if cur_llm == pid %}checked{% endif %}
+                 onchange="switchLLM('{{ pid }}')">
+          <div class="platform-tile {% if cur_llm == pid %}active{% endif %}" id="llm-tile-{{ pid }}"
+               style="min-width:100px;">
+            <i class="bi {{ picon }}"></i>
+            <div class="pt-label">{{ plabel }}</div>
+            <div style="font-size:10px; color:var(--muted);">{{ pdesc }}</div>
+          </div>
+        </label>
+        {% endfor %}
+      </div>
+
+      <!-- Shared fields -->
+      <div class="cred-grid" id="llm-fields-shared"
+           {% if cur_llm == 'disabled' %}style="display:none"{% endif %}>
+        <div class="field-wrap">
+          <label>Model name <code style="text-transform:none;font-size:10px;">LLM_MODEL</code></label>
+          <input type="text" name="llm_model" class="form-control"
+                 value="{{ llm_raw.get('model', cfg.llm.model if cfg.llm else 'llama3.2') }}"
+                 placeholder="llama3.2 / gpt-4o-mini / claude-haiku-4-5-20251001">
+          <div class="hint">Model identifier — must be pulled/available for the chosen provider</div>
+        </div>
+        <div class="field-wrap" id="llm-field-base-url">
+          <label>Base URL <code style="text-transform:none;font-size:10px;">LLM_BASE_URL</code></label>
+          <input type="text" name="llm_base_url" class="form-control"
+                 value="{{ llm_raw.get('base_url', cfg.llm.base_url if cfg.llm else 'http://localhost:11434') }}"
+                 placeholder="http://localhost:11434">
+          <div class="hint">Ollama or OpenAI-compatible endpoint URL</div>
+        </div>
+        <div class="field-wrap" id="llm-field-api-key">
+          <label>API Key <code style="text-transform:none;font-size:10px;">LLM_API_KEY</code></label>
+          <input type="password" name="llm_api_key" class="form-control"
+                 value="{{ llm_raw.get('api_key', '') }}"
+                 placeholder="sk-… / dapi…">
+          <div class="hint">Required for OpenAI and Anthropic — prefer env var over YAML</div>
+        </div>
+        <div class="field-wrap">
+          <label>Temperature</label>
+          <input type="number" name="llm_temperature" class="form-control"
+                 value="{{ llm_raw.get('temperature', 0.3) }}" step="0.05" min="0" max="2">
+          <div class="hint">Lower = more deterministic; higher = more creative</div>
+        </div>
+        <div class="field-wrap">
+          <label>Max tokens</label>
+          <input type="number" name="llm_max_tokens" class="form-control"
+                 value="{{ llm_raw.get('max_tokens', 512) }}" min="64" max="4096" step="64">
+          <div class="hint">Per cluster summary generation call</div>
+        </div>
+      </div>
+
+      <!-- Test button (outside form) -->
+      <div id="llm-test-bar" class="test-bar"
+           {% if cur_llm == 'disabled' %}style="display:none"{% endif %}>
+        <button type="button" class="btn btn-sm btn-outline-secondary"
+                onclick="testLLM()">
+          <i class="bi bi-lightning me-1"></i>Test LLM
+        </button>
+        <span id="llmTestResult" style="font-size:12px;"></span>
+        <span style="font-size:11px; color:var(--muted); margin-left:8px;" id="llmModelsList"></span>
+      </div>
+
+      <div id="llm-ollama-hint"
+           style="margin-top:10px; font-size:11px; color:var(--muted);"
+           {% if cur_llm != 'ollama' %}style="display:none"{% endif %}>
+        <i class="bi bi-info-circle me-1"></i>
+        Ollama not running? Run:
+        <code>powershell -ExecutionPolicy Bypass -File scripts\install_ollama.ps1</code>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 5. Storage ────────────────────────────────────────────────────── -->
   <div class="card">
     <div class="card-body" style="padding:20px 24px;">
       <div class="section-heading"><i class="bi bi-folder2 me-1"></i>Storage</div>
@@ -402,6 +499,106 @@ async function testConnection() {
   }
   btns.forEach(b => { b.disabled = false; b.innerHTML = '<i class="bi bi-plug me-1"></i>Test Source'; });
 }
+
+// ── LLM provider switcher ────────────────────────────────────────────────────
+function switchLLM(pid) {
+  document.querySelectorAll('[id^="llm-tile-"]').forEach(t => t.classList.remove('active'));
+  const tile = document.getElementById(`llm-tile-${pid}`);
+  if (tile) tile.classList.add('active');
+
+  const disabled = pid === 'disabled';
+  document.getElementById('llm-fields-shared').style.display = disabled ? 'none' : '';
+  document.getElementById('llm-test-bar').style.display       = disabled ? 'none' : '';
+  document.getElementById('llm-ollama-hint').style.display    = pid === 'ollama' ? '' : 'none';
+
+  // Show/hide base-url and api-key fields by provider
+  const burl = document.getElementById('llm-field-base-url');
+  const akey = document.getElementById('llm-field-api-key');
+  if (burl) burl.style.display = (pid === 'ollama' || pid === 'openai') ? '' : 'none';
+  if (akey) akey.style.display = (pid === 'openai' || pid === 'anthropic') ? '' : 'none';
+}
+
+// ── Read current LLM form values (tests BEFORE saving) ───────────────────────
+function _currentLLMConfig() {
+  const radio = document.querySelector('input[name="llm_provider"]:checked');
+  return {
+    provider: radio ? radio.value : 'disabled',
+    model:    (document.querySelector('input[name="llm_model"]')?.value    || '').trim(),
+    base_url: (document.querySelector('input[name="llm_base_url"]')?.value || '').trim(),
+    api_key:  (document.querySelector('input[name="llm_api_key"]')?.value  || '').trim(),
+  };
+}
+
+async function testLLM() {
+  const resEl  = document.getElementById('llmTestResult');
+  const modEl  = document.getElementById('llmModelsList');
+  const btnEl  = document.querySelector('#llm-test-bar button');
+  if (!resEl) return;
+
+  resEl.innerHTML    = '<span class="spinner-border spinner-border-sm me-1"></span> Testing…';
+  modEl.textContent  = '';
+  if (btnEl) btnEl.disabled = true;
+
+  const cfg = _currentLLMConfig();
+
+  try {
+    const d = await apiFetch('/api/llm/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg),
+    });
+    if (d.ok) {
+      resEl.innerHTML =
+        `<span style="color:var(--green);">` +
+        `<i class="bi bi-check-circle me-1"></i>` +
+        `<b>${d.provider}</b> · ${d.model} · "${d.response}"</span>`;
+      // Update status chip immediately
+      _setStatusChip(true, `${d.provider}: ${d.model}`);
+    } else {
+      resEl.innerHTML =
+        `<span style="color:var(--red);"><i class="bi bi-x-circle me-1"></i>${d.error}</span>`;
+    }
+  } catch (e) {
+    resEl.innerHTML =
+      `<span style="color:var(--red);"><i class="bi bi-x-circle me-1"></i>${e.message}</span>`;
+  } finally {
+    if (btnEl) btnEl.disabled = false;
+  }
+
+  // Fetch and display available Ollama models
+  if (cfg.provider === 'ollama') {
+    try {
+      const s = await apiFetch('/api/llm/status');
+      if (s.available_models?.length) {
+        modEl.textContent = `Models: ${s.available_models.slice(0, 6).join(' · ')}`;
+      }
+    } catch {}
+  }
+}
+
+function _setStatusChip(available, text) {
+  const chip = document.getElementById('llmStatusChip');
+  if (!chip) return;
+  chip.textContent       = text;
+  chip.style.background  = available ? 'rgba(63,185,80,.15)' : 'rgba(248,81,73,.12)';
+  chip.style.color       = available ? 'var(--green)' : 'var(--red)';
+}
+
+// Check LLM status on page load (uses saved config)
+document.addEventListener('DOMContentLoaded', async () => {
+  const chip = document.getElementById('llmStatusChip');
+  if (!chip) return;
+  try {
+    const s = await apiFetch('/api/llm/status');
+    if (s.provider === 'disabled') {
+      _setStatusChip(false, 'disabled — rule-based only');
+    } else {
+      _setStatusChip(s.available, s.available ? `${s.provider}: ${s.model}` : `${s.provider}: offline`);
+    }
+  } catch {
+    chip.textContent = 'status unknown';
+  }
+});
 
 // ── Platform switcher ────────────────────────────────────────────────────────
 function switchPlatform(pid) {

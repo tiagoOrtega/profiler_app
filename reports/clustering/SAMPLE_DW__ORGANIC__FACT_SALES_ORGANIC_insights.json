@@ -1,0 +1,37 @@
+{
+  "provider": "ollama",
+  "model": "llama3.2",
+  "cluster_insights": {
+    "0": {
+      "summary": "This cluster represents sales data from a specific time period, likely a quarter or month, with high gross and net amounts.",
+      "characteristics": [
+        "High Gross Amount",
+        "High Net Amount",
+        "Recent Date"
+      ],
+      "label": "Quarterly Sales"
+    },
+    "1": {
+      "summary": "This cluster consists of sales data from a specific store with high unit prices and promotions.",
+      "characteristics": [
+        "High unit price",
+        "Promotions present",
+        "Store sales dominance"
+      ],
+      "label": "Store Sales Dominance"
+    },
+    "2": {
+      "summary": "This cluster represents a high-value sales group with low unit costs and high margins.",
+      "characteristics": [
+        "High gross amounts",
+        "Low unit prices",
+        "High margin amounts"
+      ],
+      "label": "Premium Sales Group"
+    }
+  },
+  "global_insights": "Here are four concise, actionable business insights from the K-Means clustering:\n\n\u2022 **Sales Performance Variance**: The three clusters exhibit distinct sales performance patterns. Cluster 0 has the highest sales volume (46.8%), followed by Cluster 1 (42.6%), and Cluster 2 (10.6%). This suggests that some customers or products are performing significantly better than others, indicating opportunities for targeted marketing and optimization.\n\n\u2022 **Product Price Elasticity**: The clusters differ in price elasticity, with Cluster 0 having the highest unit prices and log1p_unit_price values, indicating a higher sensitivity to price changes. In contrast, Cluster 2 has lower prices, suggesting a more elastic demand curve. This insight can inform pricing strategies and promotions tailored to specific customer segments.\n\n\u2022 **Customer Loyalty**: The cluster distribution reveals differences in customer loyalty. Cluster 0 customers are the most loyal, with a higher number of rows (28,083) compared to Clusters 1 and 2. This suggests that retaining these high-value customers is crucial for business growth. Conversely, Cluster 2 customers may require more attention to re-engage them.\n\n\u2022 **Store Performance**: The clustering highlights store performance disparities. Cluster 0 stores have the highest sales volume (46.8%), while Cluster 2 stores have significantly lower sales (10.6%). This indicates that some stores are underperforming and may benefit from targeted support, training, or operational improvements to boost sales and customer engagement.",
+  "rule_based": false,
+  "errors": [],
+  "generated_at": "2026-06-08T11:35:03.783046"
+}

@@ -664,5 +664,233 @@
         "max_val": null
       }
     }
+  },
+  "SAMPLE_DW.ORGANIC.FACT_SALES_ORGANIC": {
+    "row_count": 120000,
+    "profiled_at": "2026-06-08T14:29:28.294403+00:00",
+    "columns": {
+      "SALE_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 34641.16048864414,
+        "variance": 1200010000.0000002,
+        "mean": 60000.5,
+        "min_val": 1.0,
+        "max_val": 120000.0
+      },
+      "DATE_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 4387.456536615575,
+        "variance": 19249774.860690735,
+        "mean": 20233429.66078333,
+        "min_val": 20230101.0,
+        "max_val": 20241231.0
+      },
+      "CUSTOMER_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 823.3363519501565,
+        "variance": 677882.748442592,
+        "mean": 1356.6306916666667,
+        "min_val": 1.0,
+        "max_val": 3000.0
+      },
+      "PRODUCT_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 231.04757343529187,
+        "variance": 53382.981190336584,
+        "mean": 400.6472,
+        "min_val": 1.0,
+        "max_val": 800.0
+      },
+      "STORE_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 57.75204939963241,
+        "variance": 3335.2992098575824,
+        "mean": 100.25305,
+        "min_val": 1.0,
+        "max_val": 200.0
+      },
+      "EMPLOYEE_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 173.32153545829797,
+        "variance": 30040.354653622046,
+        "mean": 301.53999166666665,
+        "min_val": 1.0,
+        "max_val": 600.0
+      },
+      "PROMOTION_KEY": {
+        "null_rate": 0.49995,
+        "std_dev": 57.687826656439235,
+        "variance": 3327.8853443433813,
+        "mean": 100.83218344832183,
+        "min_val": 1.0,
+        "max_val": 200.0
+      },
+      "CHANNEL_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 1.4153624519620125,
+        "variance": 2.00325087042392,
+        "mean": 2.9943,
+        "min_val": 1.0,
+        "max_val": 5.0
+      },
+      "TRANSACTION_ID": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "PAYMENT_METHOD": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "QUANTITY": {
+        "null_rate": 0.0,
+        "std_dev": 1.7065580141160734,
+        "variance": 2.9123402555437963,
+        "mean": 3.500825,
+        "min_val": 1.0,
+        "max_val": 6.0
+      },
+      "UNIT_PRICE": {
+        "null_rate": 0.0,
+        "std_dev": 387.6703308738798,
+        "variance": 150288.28543986342,
+        "mean": 275.55504383333334,
+        "min_val": 2.34,
+        "max_val": 2811.06
+      },
+      "UNIT_COST": {
+        "null_rate": 0.0,
+        "std_dev": 240.59454547803563,
+        "variance": 57885.73531378255,
+        "mean": 174.94469166666667,
+        "min_val": 2.0,
+        "max_val": 1373.0
+      },
+      "DISCOUNT_AMOUNT": {
+        "null_rate": 0.0,
+        "std_dev": 351.28545111814964,
+        "variance": 123401.46816728191,
+        "mean": 115.94113591666665,
+        "min_val": 0.0,
+        "max_val": 9085.83
+      },
+      "GROSS_AMOUNT": {
+        "null_rate": 0.0,
+        "std_dev": 1579.827688279955,
+        "variance": 2495855.524655987,
+        "mean": 964.6058746666668,
+        "min_val": 2.34,
+        "max_val": 16866.36
+      },
+      "NET_AMOUNT": {
+        "null_rate": 0.0,
+        "std_dev": 1423.8001754818,
+        "variance": 2027206.939702004,
+        "mean": 848.6647796666667,
+        "min_val": 1.12,
+        "max_val": 16866.36
+      },
+      "TAX_AMOUNT": {
+        "null_rate": 0.0,
+        "std_dev": 113.90402798868179,
+        "variance": 12974.127592046405,
+        "mean": 67.89316691666667,
+        "min_val": 0.09,
+        "max_val": 1349.31
+      },
+      "MARGIN_AMOUNT": {
+        "null_rate": 0.0,
+        "std_dev": 575.4621341031836,
+        "variance": 331156.6677865906,
+        "mean": 309.7742736666667,
+        "min_val": 0.17,
+        "max_val": 8718.36
+      },
+      "IS_WEEKEND": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "IS_HOLIDAY": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "SEASON": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      }
+    }
+  },
+  "SAMPLE_DW.ORGANIC.DIM_CHANNEL": {
+    "row_count": 5,
+    "profiled_at": "2026-06-08T14:18:45.766206+00:00",
+    "columns": {
+      "CHANNEL_KEY": {
+        "null_rate": 0.0,
+        "std_dev": 1.5811388300841898,
+        "variance": 2.5,
+        "mean": 3.0,
+        "min_val": 1.0,
+        "max_val": 5.0
+      },
+      "CHANNEL_ID": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "CHANNEL_NAME": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "CHANNEL_TYPE": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "IS_DIGITAL": {
+        "null_rate": 0.0,
+        "std_dev": null,
+        "variance": null,
+        "mean": null,
+        "min_val": null,
+        "max_val": null
+      },
+      "BASE_AOV_MULTIPLIER": {
+        "null_rate": 0.0,
+        "std_dev": 0.09617692030835638,
+        "variance": 0.009249999999999935,
+        "mean": 1.01,
+        "min_val": 0.9,
+        "max_val": 1.15
+      }
+    }
   }
 }

@@ -1,0 +1,37 @@
+{
+  "provider": "ollama",
+  "model": "llama3.2",
+  "cluster_insights": {
+    "0": {
+      "summary": "This cluster consists of sales data with high gross amounts and low unit costs, indicating a focus on product profitability.",
+      "characteristics": [
+        "High Gross Amounts",
+        "Low Unit Costs",
+        "Product Profitability"
+      ],
+      "label": "Profitable Product Sales"
+    },
+    "1": {
+      "summary": "This cluster consists of sales data with high gross amounts and low unit costs, indicating a focus on cost-effective products.",
+      "characteristics": [
+        "High Gross Amounts",
+        "Low Unit Costs",
+        "Cost-Effective Products"
+      ],
+      "label": "Efficient Sales Cluster"
+    },
+    "2": {
+      "summary": "This cluster consists of sales data with high gross amounts and low unit costs, indicating a focus on quantity over price.",
+      "characteristics": [
+        "High Gross Amounts",
+        "Low Unit Costs",
+        "High Quantity"
+      ],
+      "label": "Efficient Sales"
+    }
+  },
+  "global_insights": "Here are four concise, actionable business insights based on the K-Means clustering:\n\n\u2022 **High-value customers are concentrated in Cluster 0**: With 79.8% of the data points, Cluster 0 represents a large proportion of the dataset. Analyzing this cluster could reveal patterns and trends among high-value customers, potentially informing targeted marketing strategies or loyalty programs.\n\n\u2022 **Cluster 1 contains anomalies with unusual promotion behavior**: The small size (4.2%) of Cluster 1 suggests that these observations may be data entry errors or outliers due to unusual promotional activities. Investigating these cases could help identify areas for process improvement and reduce unnecessary costs.\n\n\u2022 **Cluster 2 shows a mix of low and high sales volumes, suggesting potential opportunities for upselling**: The moderate separation (silhouette score 0.422) between Cluster 1 and the remaining data points indicates that there may be some overlap in terms of sales behavior. Analyzing this cluster could reveal patterns or trends among customers with varying sales volumes, potentially informing upselling strategies.\n\n\u2022 **Discount amounts are significantly higher in Cluster 2**: The large difference in discount amounts between Clusters 0 and 2 suggests that Cluster 2 may represent a segment of customers who are more price-sensitive. Understanding these customer segments could help inform pricing strategies or loyalty programs to retain this group.",
+  "rule_based": false,
+  "errors": [],
+  "generated_at": "2026-06-08T09:58:43.504040"
+}

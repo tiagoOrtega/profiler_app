@@ -45,6 +45,16 @@ class AlertConfig:
 
 
 @dataclass
+class LLMConfig:
+    provider:    str   = "disabled"              # ollama | openai | anthropic | disabled
+    model:       str   = "llama3.2"
+    base_url:    str   = "http://localhost:11434" # Ollama or OpenAI-compatible URL
+    api_key:     str   = ""                      # cloud providers (prefer env vars)
+    temperature: float = 0.3
+    max_tokens:  int   = 512
+
+
+@dataclass
 class ProfilerConfig:
     snowflake:   SnowflakeConfig
     alerts:      AlertConfig
@@ -52,6 +62,7 @@ class ProfilerConfig:
     platform:    str        = "snowflake"   # snowflake | sqlite | databricks
     sqlite:      SQLiteConfig     = field(default_factory=SQLiteConfig)
     databricks:  DatabricksConfig = field(default_factory=DatabricksConfig)
+    llm:         LLMConfig        = field(default_factory=LLMConfig)
     output_dir:   str = "reports"
     history_file: str = "profiling_history.json"
 
@@ -97,6 +108,18 @@ def load_config(config_path: str = "config.yaml") -> ProfilerConfig:
         schema=os.getenv("DATABRICKS_SCHEMA",  db.get("schema",    "default")),
     )
 
+    lm = cfg.get("llm", {})
+    llm = LLMConfig(
+        provider=os.getenv("LLM_PROVIDER",     lm.get("provider",    "disabled")),
+        model=os.getenv("LLM_MODEL",           lm.get("model",       "llama3.2")),
+        base_url=os.getenv("LLM_BASE_URL",     lm.get("base_url",    "http://localhost:11434")),
+        api_key=os.getenv("LLM_API_KEY",       lm.get("api_key",     "")) or
+                os.getenv("OPENAI_API_KEY",    "") or
+                os.getenv("ANTHROPIC_API_KEY", ""),
+        temperature=float(lm.get("temperature", 0.3)),
+        max_tokens=int(lm.get("max_tokens", 512)),
+    )
+
     return ProfilerConfig(
         snowflake=snowflake,
         alerts=alerts,
@@ -104,6 +127,7 @@ def load_config(config_path: str = "config.yaml") -> ProfilerConfig:
         platform=cfg.get("platform", "snowflake"),
         sqlite=sqlite,
         databricks=databricks,
+        llm=llm,
         output_dir=cfg.get("output_dir", "reports"),
         history_file=cfg.get("history_file", "profiling_history.json"),
     )

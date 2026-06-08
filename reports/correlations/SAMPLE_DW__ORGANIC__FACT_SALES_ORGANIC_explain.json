@@ -1,0 +1,34 @@
+{
+  "explanation": "Here's a clear and concise explanation of the Pearson correlation matrix for the business audience:\n\n\u2022 **Strong Positive Correlations:**\nThe strongest positive correlations indicate that there is a strong relationship between certain variables, meaning that as one variable increases, the other variable also tends to increase. For example, a +1.000 correlation between NET_AMOUNT and TAX_AMOUNT means that every time the net amount increases, the tax amount also increases by the same proportion. This suggests that our pricing strategy may be effective in generating both revenue and profit.\n\n\u2022 **Strong Negative Correlations:**\nThe strongest negative correlations reveal that there is a weak relationship between certain variables, meaning that as one variable increases, the other variable tends to decrease. In this case, a -0.028 correlation between CHANNEL_KEY and UNIT_PRICE indicates that when the channel (e.g., online or offline) changes, the unit price may slightly decrease. This could be an opportunity for us to optimize our pricing strategy across different channels.\n\n\u2022 **Near-Independent Columns:**\nThe near-zero correlations between CHANNEL_KEY and other variables suggest that the channel is nearly independent of the other factors. This might not be surprising if we expect different channels to have different characteristics or behaviors. However, it's also possible that there are some underlying factors that we're not capturing yet.\n\n\u2022 **Actionable Recommendation:**\nBased on the strong positive correlations between UNIT_PRICE and GROSS_AMOUNT, as well as UNIT_PRICE and NET_AMOUNT, our recommendation is to closely monitor and optimize our pricing strategy to maximize revenue and profit. By analyzing these relationships, we can identify opportunities to adjust prices in response to changes in demand or market conditions, ultimately driving business growth and profitability.",
+  "rule_based": false,
+  "provider": "ollama",
+  "model": "llama3.2",
+  "generated_at": "2026-06-08T11:50:06.777346",
+  "top_pairs": [
+    [
+      1.0,
+      "NET_AMOUNT",
+      "TAX_AMOUNT"
+    ],
+    [
+      0.9813,
+      "UNIT_PRICE",
+      "UNIT_COST"
+    ],
+    [
+      0.978,
+      "GROSS_AMOUNT",
+      "TAX_AMOUNT"
+    ],
+    [
+      0.978,
+      "GROSS_AMOUNT",
+      "NET_AMOUNT"
+    ],
+    [
+      0.8569,
+      "UNIT_PRICE",
+      "GROSS_AMOUNT"
+    ]
+  ]
+}

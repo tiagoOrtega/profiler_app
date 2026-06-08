@@ -4,8 +4,22 @@ alerts:
   row_count_change_threshold: 0.2
   slack_webhook_url: null
   std_dev_change_threshold: 0.3
+databricks:
+  catalog: main
+  host: ''
+  http_path: ''
+  schema: default
+  token: ''
 history_file: profiling_history.json
+llm:
+  api_key: ''
+  base_url: http://localhost:11434
+  max_tokens: 512
+  model: llama3.2
+  provider: ollama
+  temperature: 0.3
 output_dir: reports
+platform: snowflake
 snowflake:
   account: AFXNUJS-SG28711
   database: SAMPLE_DW
@@ -14,3 +28,6 @@ snowflake:
   schema: RETAIL
   user: tiagoOrtega
   warehouse: PROFILER_APP
+source_name: My Source
+sqlite:
+  database_path: ./sample.db

@@ -21,6 +21,11 @@ from connection import SnowflakeConnection
 from history import HistoryManager
 from profiling import DataProfiler
 from relationships import RelationshipDetector
+from clustering import ClusteringEngine, MODELS as CLUSTERING_MODELS
+from llm_providers import get_provider
+from llm_insights import InsightsEngine
+from comment_generator import CommentGenerator
+from feature_selector  import FeatureSelector
 
 
 def _get_platform(cfg):
@@ -42,6 +47,11 @@ _jobs: dict = {}
 _setup_jobs: dict = {}
 _rel_jobs: dict = {}
 _corr_jobs: dict = {}
+_cluster_jobs:  dict = {}
+_insights_jobs: dict = {}
+_comment_jobs:  dict = {}
+_correxp_jobs:  dict = {}
+_featimp_jobs:  dict = {}
 _SETUP_SQL = Path(__file__).parent / "setup_snowflake.sql"
 
 
@@ -129,6 +139,14 @@ def config_page():
             },
             "output_dir":   request.form.get("output_dir",   "reports").strip(),
             "history_file": request.form.get("history_file", "profiling_history.json").strip(),
+            "llm": {
+                "provider":    request.form.get("llm_provider",    "disabled").strip(),
+                "model":       request.form.get("llm_model",       "llama3.2").strip(),
+                "base_url":    request.form.get("llm_base_url",    "http://localhost:11434").strip(),
+                "api_key":     request.form.get("llm_api_key",     "").strip(),
+                "temperature": float(request.form.get("llm_temperature", 0.3)),
+                "max_tokens":  int(request.form.get("llm_max_tokens", 512)),
+            },
         }
         with open(_CONFIG_PATH, "w") as f:
             yaml.dump(payload, f, default_flow_style=False, allow_unicode=True)
@@ -207,13 +225,14 @@ def _run_job(job_id: str, db: str, schema: str, table: str) -> None:
         am.send_slack(f"Profiled {db}.{schema}.{table}")
 
         _jobs[job_id].update({
-            "status": "done",
-            "database": db,
-            "schema": schema,
-            "table": table,
-            "row_count": profile.row_count,
+            "status":       "done",
+            "database":     db,
+            "schema":       schema,
+            "table":        table,
+            "row_count":    profile.row_count,
             "column_count": profile.column_count,
-            "alert_count": len(am.alerts),
+            "alert_count":  len(am.alerts),
+            "error_count":  sum(1 for c in profile.columns if c.error),
         })
     except Exception as exc:
         _jobs[job_id].update({"status": "error", "error": str(exc)})
@@ -245,7 +264,25 @@ def api_profile_status(job_id: str):
 
 @app.route("/profile")
 def profile_page():
-    return render_template("profile.html", cfg=_cfg())
+    cfg = _cfg()
+    recent = []
+    try:
+        for fp in sorted(_reports_dir(cfg).glob("*.json"),
+                         key=lambda p: p.stat().st_mtime, reverse=True)[:10]:
+            with open(fp) as f:
+                d = json.load(f)
+            recent.append({
+                "db":          d.get("database", ""),
+                "schema":      d.get("schema",   ""),
+                "table":       d.get("table",    ""),
+                "row_count":   d.get("row_count", 0),
+                "profiled_at": (d.get("profiled_at") or "")[:10],
+                "source_name": d.get("source_name", ""),
+                "platform":    d.get("platform", ""),
+            })
+    except Exception:
+        pass
+    return render_template("profile.html", cfg=cfg, recent=recent)
 
 
 @app.route("/report")
@@ -665,6 +702,613 @@ def api_corr_saved():
 @app.route("/api/correlation/<job_id>")
 def api_correlation_status(job_id: str):
     job = _corr_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(job)
+
+
+# ── Clustering ────────────────────────────────────────────────────────────────
+
+def _cluster_saved_path(cfg, db: str, schema: str, table: str) -> Path:
+    d = _reports_dir(cfg) / "clustering"
+    d.mkdir(exist_ok=True)
+    key = f"{db.upper()}__{schema.upper()}__{table.upper()}"
+    return d / f"{key}.json"
+
+
+def _load_cluster_saved(cfg, db: str, schema: str, table: str) -> dict:
+    p = _cluster_saved_path(cfg, db, schema, table)
+    if p.exists():
+        with open(p) as f:
+            return json.load(f)
+    return {"columns_used": [], "n_clusters": 0, "computed_at": None}
+
+
+def _save_cluster_file(cfg, db: str, schema: str, table: str, data: dict) -> None:
+    with open(_cluster_saved_path(cfg, db, schema, table), "w") as f:
+        json.dump(data, f, indent=2, default=str)
+
+
+def _run_cluster_job(
+    job_id: str, db: str, schema: str, table: str,
+    model_name: str, params: dict, columns: list,
+    feature_ids: list, sample_size: int,
+) -> None:
+    _cluster_jobs[job_id]["status"] = "running"
+    try:
+        from datetime import datetime as _dt
+        cfg     = _cfg()
+        engine  = ClusteringEngine(_get_platform(cfg), _reports_dir(cfg))
+        result  = engine.run(
+            db, schema, table,
+            model_name=model_name,
+            params=params,
+            columns=columns or None,
+            feature_ids=feature_ids or None,
+            sample_size=sample_size,
+        )
+        save_data = {
+            **result,
+            "database":    db,
+            "schema":      schema,
+            "table":       table,
+            "source_name": cfg.source_name,
+            "computed_at": _dt.now().isoformat(),
+        }
+        _save_cluster_file(cfg, db, schema, table, save_data)
+        _cluster_jobs[job_id].update({"status": "done", **save_data})
+    except Exception as exc:
+        _cluster_jobs[job_id].update({"status": "error", "error": str(exc)})
+
+
+@app.route("/api/clustering/models")
+def api_clustering_models():
+    """Return model registry (params schema) for the frontend."""
+    return jsonify(CLUSTERING_MODELS)
+
+
+@app.route("/api/clustering/auto-columns")
+def api_clustering_auto_columns():
+    """Return auto-selected numeric columns for a table."""
+    db     = request.args.get("db",     "").strip().upper()
+    schema = request.args.get("schema", "").strip().upper()
+    table  = request.args.get("table",  "").strip().upper()
+    if not all([db, schema, table]):
+        return jsonify({"error": "db, schema, table required"}), 400
+    try:
+        cfg    = _cfg()
+        engine = ClusteringEngine(_get_platform(cfg), _reports_dir(cfg))
+        cols   = engine.auto_select_columns(db, schema, table)
+        return jsonify({"columns": cols})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/clustering", methods=["POST"])
+def api_run_clustering():
+    body        = request.get_json(silent=True) or {}
+    db          = body.get("database",    "").strip()
+    schema      = body.get("schema",      "").strip()
+    table       = body.get("table",       "").strip()
+    model_name  = body.get("model",       "kmeans").strip()
+    params      = body.get("params",      {})
+    columns     = body.get("columns",     [])
+    feature_ids = body.get("feature_ids", [])
+    sample_size = int(body.get("sample_size", 10_000))
+
+    if not all([db, schema, table]):
+        return jsonify({"error": "database, schema and table are required"}), 400
+    if model_name not in CLUSTERING_MODELS:
+        return jsonify({"error": f"Unknown model: {model_name!r}"}), 400
+
+    job_id = str(uuid.uuid4())
+    _cluster_jobs[job_id] = {"status": "pending", "error": None}
+    threading.Thread(
+        target=_run_cluster_job,
+        args=(job_id, db, schema, table, model_name, params, columns, feature_ids, sample_size),
+        daemon=True,
+    ).start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/api/clustering/<job_id>")
+def api_clustering_status(job_id: str):
+    job = _cluster_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(job)
+
+
+@app.route("/api/clustering/features")
+def api_clustering_features():
+    """Return auto-suggested features (originals + transforms + ratios) for a table."""
+    db     = request.args.get("db",     "").strip().upper()
+    schema = request.args.get("schema", "").strip().upper()
+    table  = request.args.get("table",  "").strip().upper()
+    if not all([db, schema, table]):
+        return jsonify({"error": "db, schema, table required"}), 400
+    try:
+        cfg     = _cfg()
+        engine  = ClusteringEngine(_get_platform(cfg), _reports_dir(cfg))
+        suggestions = engine.suggest_features(db, schema, table)
+        return jsonify({"features": suggestions})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/clustering/saved")
+def api_cluster_saved():
+    db     = request.args.get("db",     "").strip().upper()
+    schema = request.args.get("schema", "").strip().upper()
+    table  = request.args.get("table",  "").strip().upper()
+    if not all([db, schema, table]):
+        return jsonify({"error": "db, schema, table required"}), 400
+    return jsonify(_load_cluster_saved(_cfg(), db, schema, table))
+
+
+# ── LLM provider ──────────────────────────────────────────────────────────────
+
+@app.route("/api/llm/status")
+def api_llm_status():
+    cfg      = _cfg()
+    provider = get_provider(cfg.llm)
+    info     = provider.info()
+    if cfg.llm.provider == "ollama":
+        try:
+            info["available_models"] = provider.list_models()
+        except Exception:
+            info["available_models"] = []
+    return jsonify(info)
+
+
+@app.route("/api/llm/test", methods=["POST"])
+def api_llm_test():
+    """
+    Test the LLM provider.
+    Accepts an optional JSON body with inline config so the user can test
+    BEFORE saving (form values → body → test, no save required).
+    Falls back to the saved config when the body is empty.
+    """
+    from config import LLMConfig
+    body = request.get_json(silent=True) or {}
+
+    if body.get("provider") and body["provider"] != "disabled":
+        cfg_llm = LLMConfig(
+            provider=body.get("provider", "disabled"),
+            model=body.get("model", "llama3.2"),
+            base_url=body.get("base_url", "http://localhost:11434"),
+            api_key=body.get("api_key", ""),
+            temperature=float(body.get("temperature", 0.3)),
+            max_tokens=int(body.get("max_tokens", 512)),
+        )
+    else:
+        cfg_llm = _cfg().llm
+
+    try:
+        provider = get_provider(cfg_llm)
+        if cfg_llm.provider == "disabled":
+            return jsonify({
+                "ok": False,
+                "error": "LLM provider is set to Disabled. "
+                         "Select Ollama, OpenAI or Anthropic and save first.",
+            }), 400
+
+        if not provider.is_available():
+            hint = ""
+            if cfg_llm.provider == "ollama":
+                hint = " Is Ollama running? Run: scripts\\start_llm.ps1"
+            elif cfg_llm.provider in ("openai", "anthropic"):
+                hint = " Check your API key."
+            return jsonify({
+                "ok": False,
+                "error": f"Provider '{cfg_llm.provider}' is not reachable.{hint}",
+            }), 400
+
+        resp = provider.generate(
+            "Reply with exactly two words: connection successful",
+            temperature=0.1, max_tokens=20,
+        )
+        return jsonify({
+            "ok":       True,
+            "response": resp or "(connected — no text returned)",
+            "provider": cfg_llm.provider,
+            "model":    cfg_llm.model,
+        })
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+# ── Clustering insights ────────────────────────────────────────────────────────
+
+def _insights_saved_path(cfg, db: str, schema: str, table: str) -> Path:
+    d = _reports_dir(cfg) / "clustering"
+    d.mkdir(exist_ok=True)
+    key = f"{db.upper()}__{schema.upper()}__{table.upper()}"
+    return d / f"{key}_insights.json"
+
+
+def _run_insights_job(job_id: str, db: str, schema: str, table: str) -> None:
+    _insights_jobs[job_id]["status"] = "running"
+    try:
+        cfg          = _cfg()
+        # Load saved clustering result
+        saved_path   = _cluster_saved_path(cfg, db, schema, table)
+        if not saved_path.exists():
+            raise FileNotFoundError("No saved clustering result found. Run clustering first.")
+        with open(saved_path) as f:
+            cluster_data = json.load(f)
+        cluster_data.update({"database": db, "schema": schema, "table": table})
+
+        provider = get_provider(cfg.llm)
+        engine   = InsightsEngine(provider)
+        result   = engine.generate(cluster_data)
+
+        out_path = _insights_saved_path(cfg, db, schema, table)
+        with open(out_path, "w") as f:
+            json.dump(result, f, indent=2, default=str)
+
+        _insights_jobs[job_id].update({"status": "done", **result})
+    except Exception as exc:
+        _insights_jobs[job_id].update({"status": "error", "error": str(exc)})
+
+
+@app.route("/api/insights", methods=["POST"])
+def api_run_insights():
+    body   = request.get_json(silent=True) or {}
+    db     = body.get("database", "").strip()
+    schema = body.get("schema",   "").strip()
+    table  = body.get("table",    "").strip()
+    if not all([db, schema, table]):
+        return jsonify({"error": "database, schema and table are required"}), 400
+    job_id = str(uuid.uuid4())
+    _insights_jobs[job_id] = {"status": "pending", "error": None}
+    threading.Thread(
+        target=_run_insights_job, args=(job_id, db, schema, table), daemon=True
+    ).start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/api/insights/<job_id>")
+def api_insights_status(job_id: str):
+    job = _insights_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(job)
+
+
+@app.route("/api/insights/saved")
+def api_insights_saved():
+    db     = request.args.get("db",     "").strip().upper()
+    schema = request.args.get("schema", "").strip().upper()
+    table  = request.args.get("table",  "").strip().upper()
+    if not all([db, schema, table]):
+        return jsonify({"error": "db, schema, table required"}), 400
+    cfg  = _cfg()
+    path = _insights_saved_path(cfg, db, schema, table)
+    if path.exists():
+        with open(path) as f:
+            return jsonify(json.load(f))
+    return jsonify({"cluster_insights": {}, "global_insights": ""})
+
+
+# ── Comment generation ────────────────────────────────────────────────────────
+
+def _comment_saved_path(cfg, db: str, schema: str, table: str) -> Path:
+    d = _reports_dir(cfg) / "comments"
+    d.mkdir(exist_ok=True)
+    key = f"{db.upper()}__{schema.upper()}__{table.upper()}"
+    return d / f"{key}.json"
+
+
+def _run_comment_job(job_id: str, db: str, schema: str, table: str) -> None:
+    _comment_jobs[job_id]["status"] = "running"
+    try:
+        cfg = _cfg()
+        rp  = _report_path(cfg, db, schema, table)
+        if not rp.exists():
+            raise FileNotFoundError(
+                f"No profile found for {db}.{schema}.{table}. Profile the table first."
+            )
+        with open(rp) as f:
+            profile = json.load(f)
+        profile.update({"database": db, "schema": schema, "table": table})
+
+        provider = get_provider(cfg.llm)
+        result   = CommentGenerator(provider).generate(profile)
+
+        out = _comment_saved_path(cfg, db, schema, table)
+        with open(out, "w") as f:
+            json.dump(result, f, indent=2, default=str)
+
+        _comment_jobs[job_id].update({"status": "done", **result})
+    except Exception as exc:
+        _comment_jobs[job_id].update({"status": "error", "error": str(exc)})
+
+
+@app.route("/api/comments/generate", methods=["POST"])
+def api_comments_generate():
+    body   = request.get_json(silent=True) or {}
+    db     = body.get("database", "").strip()
+    schema = body.get("schema",   "").strip()
+    table  = body.get("table",    "").strip()
+    if not all([db, schema, table]):
+        return jsonify({"error": "database, schema and table are required"}), 400
+    job_id = str(uuid.uuid4())
+    _comment_jobs[job_id] = {"status": "pending", "error": None}
+    threading.Thread(
+        target=_run_comment_job, args=(job_id, db, schema, table), daemon=True
+    ).start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/api/comments/generate/<job_id>")
+def api_comments_status(job_id: str):
+    job = _comment_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(job)
+
+
+@app.route("/api/comments/saved")
+def api_comments_saved():
+    db     = request.args.get("db",     "").strip().upper()
+    schema = request.args.get("schema", "").strip().upper()
+    table  = request.args.get("table",  "").strip().upper()
+    if not all([db, schema, table]):
+        return jsonify({"error": "db, schema, table required"}), 400
+    cfg  = _cfg()
+    path = _comment_saved_path(cfg, db, schema, table)
+    if path.exists():
+        with open(path) as f:
+            return jsonify(json.load(f))
+    return jsonify({"table_comment": None, "column_comments": {}})
+
+
+@app.route("/api/comments/apply", methods=["POST"])
+def api_comments_apply():
+    """
+    Execute COMMENT ON TABLE / COMMENT ON COLUMN statements against the source.
+    For SQLite: comments are not supported by the engine — returns a saved-only message.
+    """
+    body   = request.get_json(silent=True) or {}
+    db     = body.get("database", "").strip()
+    schema = body.get("schema",   "").strip()
+    table  = body.get("table",    "").strip()
+    if not all([db, schema, table]):
+        return jsonify({"error": "database, schema and table are required"}), 400
+
+    cfg = _cfg()
+    if cfg.platform == "sqlite":
+        return jsonify({
+            "ok": True,
+            "skipped": True,
+            "message": "SQLite does not support COMMENT ON syntax. Suggestions are saved locally only.",
+        })
+
+    # Load saved suggestions
+    path = _comment_saved_path(cfg, db, schema, table)
+    if not path.exists():
+        return jsonify({"error": "No saved suggestions. Generate comments first."}), 400
+    with open(path) as f:
+        suggestions = json.load(f)
+
+    platform = _get_platform(cfg)
+    tbl_ref  = platform.table_ref(db, schema, table)
+
+    def _esc(s: str) -> str:
+        return (s or "").replace("'", "''")
+
+    stmts: list[str] = []
+    if suggestions.get("table_comment"):
+        stmts.append(f"COMMENT ON TABLE {tbl_ref} IS '{_esc(suggestions['table_comment'])}'")
+    for col_name, comment in (suggestions.get("column_comments") or {}).items():
+        if comment:
+            qcol = platform.quote_col(col_name)
+            stmts.append(
+                f"COMMENT ON COLUMN {tbl_ref}.{qcol} IS '{_esc(comment)}'"
+            )
+
+    applied, failed = [], []
+    for stmt in stmts:
+        try:
+            platform.fetch_all(stmt)
+            applied.append(stmt)
+        except Exception as exc:
+            failed.append({"stmt": stmt[:120], "error": str(exc)})
+
+    return jsonify({
+        "ok":      len(failed) == 0,
+        "applied": len(applied),
+        "failed":  failed,
+        "message": f"Applied {len(applied)} of {len(stmts)} COMMENT statements.",
+    })
+
+
+# ── Correlation explanation ────────────────────────────────────────────────────
+
+def _run_correxp_job(job_id: str, db: str, schema: str, table: str) -> None:
+    _correxp_jobs[job_id]["status"] = "running"
+    try:
+        from datetime import datetime as _dt
+        cfg = _cfg()
+
+        # Load saved correlation matrix
+        corr_path = _corr_saved_path(cfg, db, schema, table)
+        if not corr_path.exists():
+            raise FileNotFoundError("No saved correlation matrix. Run Correlation first.")
+        with open(corr_path) as f:
+            corr_data = json.load(f)
+
+        columns = corr_data.get("columns", [])
+        matrix  = corr_data.get("matrix",  [])
+        n = len(columns)
+
+        if n < 2:
+            raise ValueError("Need at least 2 columns to explain correlations.")
+
+        # Extract top-N most significant correlations for the prompt
+        pairs = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                v = matrix[i][j] if matrix and matrix[i] else None
+                if v is not None:
+                    pairs.append((abs(v), v, columns[i], columns[j]))
+        pairs.sort(reverse=True)
+        top    = [p for p in pairs if p[0] >= 0.4][:8]
+        low    = [p for p in pairs if p[0] <= 0.05][:4]
+
+        def _pair_line(abs_v, v, a, b):
+            direction = "positive" if v > 0 else "negative"
+            strength  = "strong" if abs_v >= 0.7 else "moderate" if abs_v >= 0.4 else "weak"
+            return f"  {a} ↔ {b}: r={v:+.3f} ({strength} {direction})"
+
+        top_block = "\n".join(_pair_line(*p) for p in top) or "  (no strong correlations)"
+        low_block = "\n".join(_pair_line(*p) for p in low) or "  (all columns show some correlation)"
+
+        prompt = f"""\
+You are a data analyst explaining a Pearson correlation matrix for a business audience.
+
+Table: {db}.{schema}.{table}
+Columns analysed: {', '.join(columns)}
+
+Notable correlations (|r| ≥ 0.4):
+{top_block}
+
+Near-zero correlations (|r| ≤ 0.05):
+{low_block}
+
+Write a clear, concise explanation (4–6 bullet points) covering:
+1. What the strongest positive correlations mean for the business
+2. What the strongest negative correlations (if any) reveal
+3. Which columns are nearly independent (surprising or expected?)
+4. One actionable recommendation based on the correlations
+
+Use plain language — no statistical jargon. Start each bullet with •."""
+
+        provider = get_provider(cfg.llm)
+        if provider.provider_id == "disabled" or not provider.is_available():
+            # Rule-based explanation
+            lines = ["• Correlation analysis results:"]
+            if top:
+                abs_v, v, a, b = top[0]
+                direction = "positively" if v > 0 else "negatively"
+                lines.append(f"• Strongest correlation: {a} and {b} (r={v:+.3f}) are {direction} correlated — when one increases, the other tends to {'increase' if v > 0 else 'decrease'}.")
+            strong_pos = [(a,b,v) for abs_v,v,a,b in top if v >= 0.7]
+            strong_neg = [(a,b,v) for abs_v,v,a,b in top if v <= -0.4]
+            if strong_pos:
+                lines.append(f"• {len(strong_pos)} strong positive relationship(s) detected. These columns may be driven by the same underlying factor.")
+            if strong_neg:
+                lines.append(f"• {len(strong_neg)} negative relationship(s) detected. These columns tend to move in opposite directions.")
+            if low:
+                a, b = low[0][2], low[0][3]
+                lines.append(f"• {a} and {b} are nearly independent — they carry different information and should both be retained as features.")
+            lines.append("• Consider using correlated feature pairs carefully in ML models — one may be redundant.")
+            explanation = "\n".join(lines)
+            rule_based = True
+        else:
+            explanation = provider.generate(prompt, temperature=0.3, max_tokens=600)
+            rule_based = False
+
+        result = {
+            "explanation":  explanation,
+            "rule_based":   rule_based,
+            "provider":     provider.provider_id,
+            "model":        provider.model_name,
+            "generated_at": _dt.now().isoformat(),
+            "top_pairs":    [(v, a, b) for _, v, a, b in top[:5]],
+        }
+
+        exp_path = corr_path.parent / (corr_path.stem + "_explain.json")
+        with open(exp_path, "w") as f:
+            json.dump(result, f, indent=2, default=str)
+
+        _correxp_jobs[job_id].update({"status": "done", **result})
+    except Exception as exc:
+        _correxp_jobs[job_id].update({"status": "error", "error": str(exc)})
+
+
+@app.route("/api/correlation/explain", methods=["POST"])
+def api_correxp_start():
+    body   = request.get_json(silent=True) or {}
+    db     = body.get("database", "").strip()
+    schema = body.get("schema",   "").strip()
+    table  = body.get("table",    "").strip()
+    if not all([db, schema, table]):
+        return jsonify({"error": "database, schema and table are required"}), 400
+    job_id = str(uuid.uuid4())
+    _correxp_jobs[job_id] = {"status": "pending", "error": None}
+    threading.Thread(
+        target=_run_correxp_job, args=(job_id, db, schema, table), daemon=True
+    ).start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/api/correlation/explain/<job_id>")
+def api_correxp_status(job_id: str):
+    job = _correxp_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(job)
+
+
+@app.route("/api/correlation/explain/saved")
+def api_correxp_saved():
+    db     = request.args.get("db",     "").strip().upper()
+    schema = request.args.get("schema", "").strip().upper()
+    table  = request.args.get("table",  "").strip().upper()
+    if not all([db, schema, table]):
+        return jsonify({"error": "db, schema, table required"}), 400
+    cfg  = _cfg()
+    path = _corr_saved_path(cfg, db, schema, table)
+    exp  = path.parent / (path.stem + "_explain.json")
+    if exp.exists():
+        with open(exp) as f:
+            return jsonify(json.load(f))
+    return jsonify({"explanation": None})
+
+
+# ── Feature importance ────────────────────────────────────────────────────────
+
+def _run_featimp_job(
+    job_id: str, db: str, schema: str, table: str,
+    target_col: str, sample_size: int,
+) -> None:
+    _featimp_jobs[job_id]["status"] = "running"
+    try:
+        cfg     = _cfg()
+        result  = FeatureSelector(
+            _get_platform(cfg), _reports_dir(cfg)
+        ).analyze(db, schema, table, target_col, sample_size=sample_size)
+        _featimp_jobs[job_id].update({"status": "done", **result})
+    except Exception as exc:
+        _featimp_jobs[job_id].update({"status": "error", "error": str(exc)})
+
+
+@app.route("/api/clustering/feature-importance", methods=["POST"])
+def api_feature_importance():
+    body        = request.get_json(silent=True) or {}
+    db          = body.get("database",    "").strip()
+    schema      = body.get("schema",      "").strip()
+    table       = body.get("table",       "").strip()
+    target_col  = body.get("target_col",  "").strip()
+    sample_size = int(body.get("sample_size", 8_000))
+
+    if not all([db, schema, table, target_col]):
+        return jsonify({"error": "database, schema, table and target_col are required"}), 400
+
+    job_id = str(uuid.uuid4())
+    _featimp_jobs[job_id] = {"status": "pending", "error": None}
+    threading.Thread(
+        target=_run_featimp_job,
+        args=(job_id, db, schema, table, target_col, sample_size),
+        daemon=True,
+    ).start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/api/clustering/feature-importance/<job_id>")
+def api_feature_importance_status(job_id: str):
+    job = _featimp_jobs.get(job_id)
     if not job:
         return jsonify({"error": "not found"}), 404
     return jsonify(job)

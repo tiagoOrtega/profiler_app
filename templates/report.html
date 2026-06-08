@@ -144,6 +144,14 @@
             style="font-size:10px;"></span>
     </button>
   </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#pane-cluster"
+            type="button" role="tab" id="clusterTabBtn">
+      Clustering
+      <span id="clusterTabBadge" style="display:none;" class="badge ms-1"
+            style="background:var(--purple);font-size:10px;"></span>
+    </button>
+  </li>
 </ul>
 
 <!-- ── Tab panes ─────────────────────────────────────────────────────────── -->
@@ -209,11 +217,22 @@
   <div class="tab-pane fade" id="pane-columns" role="tabpanel">
 
     <!-- Toolbar -->
-    <div class="d-flex align-items-center mb-3">
+    <div class="d-flex align-items-center mb-3 flex-wrap gap-2">
       <span id="colCountBadge" style="font-size:12px; color:var(--muted);">
         {{ profile.column_count }} columns
       </span>
-      <div class="ms-auto">
+      <div class="ms-auto d-flex gap-2 flex-wrap">
+        <button id="commentGenBtn" type="button"
+                class="btn btn-sm btn-outline-secondary"
+                onclick="generateComments()">
+          <i class="bi bi-chat-square-text me-1"></i>Suggest Comments
+        </button>
+        <button id="commentApplyBtn" type="button"
+                class="btn btn-sm btn-outline-secondary"
+                onclick="showApplyModal()"
+                style="display:none;">
+          <i class="bi bi-cloud-upload me-1"></i>Apply to DB
+        </button>
         <button id="alertFilterBtn" type="button"
                 class="btn btn-sm btn-outline-secondary"
                 onclick="toggleAlertFilter()"
@@ -225,6 +244,11 @@
           </span>
         </button>
       </div>
+    </div>
+    <!-- Comment generation status bar -->
+    <div id="commentStatusBar" style="display:none; font-size:12px; color:var(--muted);
+         margin-bottom:10px; padding:6px 10px; background:var(--bg3);
+         border-radius:5px; border:1px solid var(--border2);">
     </div>
 
     <!-- Column grid -->
@@ -271,6 +295,22 @@
           <i class="bi bi-exclamation-triangle me-1"></i>{{ col.error }}
         </div>
         {% endif %}
+
+        <!-- AI comment suggestion (injected by JS) -->
+        <div class="col-comment-suggestion" data-col="{{ col.name }}" style="display:none;
+             padding:5px 12px 4px; background:rgba(188,140,255,.07);
+             border-bottom:1px solid rgba(188,140,255,.2); font-size:11px; color:var(--text);">
+          <div style="display:flex; align-items:flex-start; gap:6px;">
+            <i class="bi bi-stars" style="color:var(--purple); font-size:12px; margin-top:1px; flex-shrink:0;"></i>
+            <span class="suggestion-text" style="flex:1; line-height:1.5;"></span>
+            <button class="btn-edit-suggestion" type="button"
+                    style="background:none;border:none;padding:0 3px;cursor:pointer;
+                           color:var(--muted);font-size:11px; flex-shrink:0;"
+                    title="Edit suggestion" onclick="_editSuggestion(this)">
+              <i class="bi bi-pencil"></i>
+            </button>
+          </div>
+        </div>
 
         <!-- Stats -->
         <div class="col-card-stats">
@@ -384,10 +424,14 @@
   <!-- ══ CORRELATION ══ -->
   <div class="tab-pane fade" id="pane-corr" role="tabpanel">
 
-    <div class="d-flex align-items-center gap-2 mb-3">
+    <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
       <button id="corrBtn" type="button" class="btn btn-sm btn-outline-secondary"
               onclick="runCorrelation()">
         <i class="bi bi-grid-3x3 me-1"></i>Run Correlation
+      </button>
+      <button id="corrExpBtn" type="button" class="btn btn-sm btn-outline-secondary"
+              onclick="runCorrExplain()" style="display:none;">
+        <i class="bi bi-stars me-1"></i>Explain Correlations
       </button>
       <span id="corrMeta" style="font-size:11px; color:var(--muted); margin-left:4px;"></span>
     </div>
@@ -399,9 +443,210 @@
         <small>Runs a single query in Snowflake — no data leaves the warehouse.</small></p>
       </div>
     </div>
+
+    <!-- Correlation explanation card (persistent) -->
+    <div id="corrExpCard" class="card mt-3" style="display:none;">
+      <div class="card-header d-flex align-items-center">
+        <i class="bi bi-stars me-1"></i>Correlation Insights
+        <span id="corrExpBadge" class="badge ms-2"
+              style="background:var(--border2);color:var(--muted);font-size:10px;font-weight:400;"></span>
+        <span id="corrExpMeta" style="font-size:11px; color:var(--muted); margin-left:8px;"></span>
+        <button class="ms-auto btn btn-sm btn-outline-secondary"
+                onclick="runCorrExplain()" id="corrExpRerunBtn" style="font-size:11px; display:none;">
+          <i class="bi bi-arrow-repeat me-1"></i>Re-explain
+        </button>
+      </div>
+      <div id="corrExpBody" class="card-body" style="padding:16px 20px; font-size:13px; line-height:1.7;"></div>
+    </div>
   </div>
 
+  <!-- ══ CLUSTERING ══ -->
+  <div class="tab-pane fade" id="pane-cluster" role="tabpanel">
+  <style>
+    .model-tile {
+      display:flex; flex-direction:column; align-items:center; gap:4px;
+      padding:10px 8px; border:1px solid var(--border2); border-radius:7px;
+      cursor:pointer; transition:all .12s; text-align:center; flex:1; min-width:100px;
+    }
+    .model-tile:hover { border-color:var(--muted); background:var(--border2); }
+    .model-tile.active { border-color:var(--purple); background:rgba(188,140,255,.09); }
+    .model-tile.active i, .model-tile.active .mt-name { color:var(--purple) !important; }
+    .model-tile i    { font-size:1.2rem; color:var(--muted); }
+    .mt-name         { font-size:11px; font-weight:600; color:var(--muted); }
+    .mt-desc         { font-size:10px; color:var(--muted); line-height:1.3; display:none; }
+    .param-grid      { display:grid; grid-template-columns:repeat(auto-fill, minmax(160px,1fr)); gap:12px; }
+    .param-wrap label { font-size:10px; font-weight:700; text-transform:uppercase;
+                        letter-spacing:.05em; color:var(--muted); display:block; margin-bottom:4px; }
+    .param-wrap .hint { font-size:10px; color:var(--muted); margin-top:3px; line-height:1.35; }
+    .metric-chip {
+      display:flex; flex-direction:column; align-items:center;
+      padding:10px 14px; border:1px solid var(--border2); border-radius:7px;
+      flex:1; min-width:120px; text-align:center;
+    }
+    .metric-chip .mv { font-size:20px; font-weight:700; line-height:1.1; }
+    .metric-chip .ml { font-size:10px; text-transform:uppercase; letter-spacing:.05em;
+                       color:var(--muted); margin-top:3px; }
+    .metric-chip .mh { font-size:10px; color:var(--muted); margin-top:1px; }
+    .col-pill {
+      display:inline-flex; align-items:center; gap:5px;
+      padding:3px 9px; border-radius:4px; border:1px solid var(--border2);
+      font-size:11px; cursor:pointer; user-select:none; transition:all .1s;
+    }
+    .col-pill.selected { border-color:var(--purple); background:rgba(188,140,255,.1); color:var(--purple); }
+    .col-pill.selected i { color:var(--purple); }
+    .section-h {
+      font-size:10px; font-weight:700; text-transform:uppercase;
+      letter-spacing:.06em; color:var(--muted);
+      display:flex; align-items:center; gap:8px; margin:16px 0 10px;
+    }
+    .section-h::after { content:''; flex:1; height:1px; background:var(--border2); }
+  </style>
+
+    <!-- Action bar -->
+    <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+      <button id="clusterBtn" type="button" class="btn btn-sm btn-outline-secondary"
+              onclick="runClustering()">
+        <i class="bi bi-stars me-1"></i>Run Clustering
+      </button>
+      <span id="clusterMeta" style="font-size:11px; color:var(--muted);"></span>
+    </div>
+
+    <!-- Config card -->
+    <div class="card mb-3">
+      <div class="card-body" style="padding:16px 20px;">
+
+        <!-- Model selector -->
+        <div class="section-h"><i class="bi bi-robot me-1"></i>Model</div>
+        <div class="d-flex gap-2 flex-wrap" id="modelTiles">
+          <!-- rendered by JS from CLUSTERING_MODELS -->
+        </div>
+        <div id="modelDesc" style="font-size:12px; color:var(--muted); margin-top:8px; min-height:28px;"></div>
+
+        <!-- Model parameters -->
+        <div class="section-h"><i class="bi bi-sliders me-1"></i>Parameters</div>
+        <div class="param-grid" id="paramGrid">
+          <!-- rendered by JS -->
+        </div>
+
+        <!-- ── Feature Importance ────────────────────────────────────── -->
+        <div class="section-h"><i class="bi bi-sort-down me-1"></i>Feature Relevance</div>
+        <div style="display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+          <div style="flex:1; min-width:180px;">
+            <div style="font-size:10px; color:var(--muted); margin-bottom:5px; text-transform:uppercase; letter-spacing:.04em;">Target Column</div>
+            <select id="targetColSelect" class="form-select form-select-sm"
+                    style="background:var(--bg); color:var(--text); border-color:var(--border); font-size:12px;">
+              <option value="">— select a target column —</option>
+              <!-- populated by JS from profile columns -->
+            </select>
+            <div style="font-size:10px; color:var(--muted); margin-top:4px; line-height:1.4;">
+              The column whose variation you want features to explain.
+              E.g. <code>CUSTOMER_SEGMENT</code>, <code>GROSS_AMOUNT</code>.
+            </div>
+          </div>
+          <div style="padding-top:20px;">
+            <button id="featImpBtn" type="button" class="btn btn-sm btn-outline-secondary"
+                    onclick="analyzeFeatureImportance()">
+              <i class="bi bi-sort-down me-1"></i>Analyze Features
+            </button>
+          </div>
+        </div>
+        <!-- Results panel -->
+        <div id="featImpResults" style="display:none; margin-top:12px;"></div>
+
+        <!-- Column selector -->
+        <div class="section-h" style="justify-content:space-between; margin-top:18px;">
+          <span><i class="bi bi-columns-gap me-1"></i>Features</span>
+          <span id="colSelCount" style="margin-left:auto; margin-right:0;
+                font-size:10px; color:var(--muted); text-transform:none; letter-spacing:0;"></span>
+        </div>
+        <div id="colPills" class="d-flex flex-wrap gap-2">
+          <!-- rendered after auto-select -->
+        </div>
+
+        <!-- Sample size -->
+        <div class="section-h"><i class="bi bi-collection me-1"></i>Sample</div>
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <div style="max-width:180px;">
+            <input type="number" id="sampleSize" class="form-control form-control-sm"
+                   value="10000" min="100" max="500000" step="1000">
+          </div>
+          <span style="font-size:11px; color:var(--muted);">
+            Max rows fetched from the source. Results in faster clustering and less browser memory.
+          </span>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Clustering results (metrics + scatter + centroid table) -->
+    <div id="clusterResults">
+      <div class="empty-state">
+        <i class="bi bi-stars"></i>
+        <p>Configure a model above and click <b>Run Clustering</b>.<br>
+        <small>Features are auto-selected from all numeric columns in this table's profile.</small></p>
+      </div>
+    </div>
+
+    <!-- ── AI Insights (persistent — not recreated on re-run) ── -->
+    <div id="insightsCard" class="card mt-3" style="display:none;">
+      <div class="card-header d-flex align-items-center" style="flex-wrap:wrap; gap:6px;">
+        <i class="bi bi-stars me-1"></i>AI Insights
+        <span id="insightsProviderBadge" class="badge"
+              style="background:var(--border2);color:var(--muted);font-size:10px;font-weight:400;"></span>
+        <span id="insightsMeta" style="font-size:11px;color:var(--muted);margin-left:4px;"></span>
+        <div class="ms-auto">
+          <button id="insightsBtn" class="btn btn-sm btn-outline-secondary"
+                  onclick="runInsights()" style="font-size:11px;">
+            <i class="bi bi-stars me-1"></i>Generate Insights
+          </button>
+        </div>
+      </div>
+      <div id="insightsBody" class="card-body" style="padding:16px 20px;">
+        <div style="font-size:12px; color:var(--muted); text-align:center; padding:8px 0;">
+          Click <b>Generate Insights</b> to analyse the clusters with AI.<br>
+          <small>Works without an LLM — rule-based insights are always generated as fallback.</small>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /pane-cluster -->
+
 </div><!-- /tab-content -->
+
+<!-- ── Apply Comments Modal ───────────────────────────────────────────────── -->
+<div class="modal fade" id="applyCommentsModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content" style="background:var(--bg2); border-color:var(--border);">
+      <div class="modal-header" style="border-color:var(--border);">
+        <h6 class="modal-title mb-0">
+          <i class="bi bi-cloud-upload me-1"></i>Apply Comments to Database
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"
+                style="filter:invert(1);opacity:.5;"></button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+          The following <code>COMMENT ON</code> statements will be executed against
+          <b>{{ profile.database }}.{{ profile.schema }}.{{ profile.table }}</b>.
+          This updates the metadata in the source database and will be visible
+          after re-profiling.
+        </p>
+        <div id="applyPreview" style="background:var(--bg); border:1px solid var(--border2);
+             border-radius:6px; padding:12px 14px; font-size:11px; font-family:monospace;
+             max-height:300px; overflow-y:auto; white-space:pre-wrap; color:var(--text);"></div>
+        <div id="applyResult" class="mt-3" style="display:none;"></div>
+      </div>
+      <div class="modal-footer" style="border-color:var(--border);">
+        <button type="button" class="btn btn-sm btn-outline-secondary"
+                data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-sm btn-primary" id="applyConfirmBtn"
+                onclick="applyComments()">
+          <i class="bi bi-cloud-upload me-1"></i>Apply All Comments
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- ── Manual Relationship Modal ──────────────────────────────────────────── -->
 <div class="modal fade" id="manualRelModal" tabindex="-1">
@@ -542,6 +787,164 @@ document.addEventListener('DOMContentLoaded', () => {
       }),
   ]);
 });
+
+// ── Feature importance ────────────────────────────────────────────────────────
+
+// Build the target column selector from all profile columns
+function _buildTargetColSelect() {
+  const sel = document.getElementById('targetColSelect');
+  if (!sel) return;
+  const allCols = {{ profile.columns | tojson }};
+  sel.innerHTML = '<option value="">— select a target column —</option>';
+  // Group: numeric first, then others
+  const numeric = allCols.filter(c => c.mean !== null);
+  const other   = allCols.filter(c => c.mean === null);
+  if (numeric.length) {
+    const grp = document.createElement('optgroup');
+    grp.label = 'Numeric';
+    numeric.forEach(c => { const o = new Option(`${c.name} (${c.data_type})`); o.value = c.name; grp.appendChild(o); });
+    sel.appendChild(grp);
+  }
+  if (other.length) {
+    const grp = document.createElement('optgroup');
+    grp.label = 'Categorical / Date';
+    other.forEach(c => { const o = new Option(`${c.name} (${c.data_type})`); o.value = c.name; grp.appendChild(o); });
+    sel.appendChild(grp);
+  }
+}
+
+async function analyzeFeatureImportance() {
+  const target = document.getElementById('targetColSelect')?.value;
+  if (!target) { alert('Select a target column first.'); return; }
+
+  const btn     = document.getElementById('featImpBtn');
+  const results = document.getElementById('featImpResults');
+  btn.disabled  = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Analysing…';
+  results.style.display = '';
+  results.innerHTML = `<div style="text-align:center; padding:16px; color:var(--muted);">
+    <div class="spinner-border text-primary mb-2" style="width:1.4rem;height:1.4rem;"></div>
+    <p style="font-size:12px;">Computing mutual information and correlations for all numeric features vs <b>${target}</b>…</p>
+  </div>`;
+
+  let jobId;
+  try {
+    const d = await apiFetch('/api/clustering/feature-importance', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        database: REL_DB, schema: REL_SCHEMA, table: REL_TABLE,
+        target_col:  target,
+        sample_size: parseInt(document.getElementById('sampleSize')?.value || '8000'),
+      }),
+    });
+    jobId = d.job_id;
+  } catch (e) {
+    results.innerHTML = `<div class="alert alert-danger" style="font-size:12px;">${e.message}</div>`;
+    btn.disabled = false; btn.innerHTML = '<i class="bi bi-sort-down me-1"></i>Analyze Features';
+    return;
+  }
+
+  const poll = setInterval(async () => {
+    try {
+      const job = await apiFetch(`/api/clustering/feature-importance/${jobId}`);
+      if (job.status === 'done') {
+        clearInterval(poll);
+        _renderFeatureImportance(job);
+        btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Re-analyze';
+      } else if (job.status === 'error') {
+        clearInterval(poll);
+        results.innerHTML = `<div class="alert alert-danger" style="font-size:12px;">${job.error}</div>`;
+        btn.disabled = false; btn.innerHTML = '<i class="bi bi-sort-down me-1"></i>Analyze Features';
+      }
+    } catch { clearInterval(poll); btn.disabled = false; }
+  }, 1500);
+}
+
+function _renderFeatureImportance(data) {
+  const results = document.getElementById('featImpResults');
+  if (!results) return;
+
+  const features = data.features || [];
+  const nRec     = data.n_recommended || 0;
+  const isCat    = data.target_type === 'categorical';
+
+  // Build the ranked bar chart
+  const rows = features.map((f, i) => {
+    const pct    = (f.combined_score * 100).toFixed(0);
+    const color  = f.combined_score >= 0.6 ? 'var(--green)'
+                 : f.combined_score >= 0.3 ? 'var(--accent)'
+                 : f.combined_score >= 0.1 ? 'var(--yellow)'
+                 : 'var(--muted)';
+    const badge  = f.recommended
+      ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;
+            background:rgba(63,185,80,.15);color:var(--green);">recommended</span>`
+      : '';
+    const corr = (!isCat && f.corr_score !== null)
+      ? `<span style="font-size:10px;color:var(--muted);">r=${f.corr_score.toFixed(2)}</span>`
+      : '';
+    return `<div style="display:flex; align-items:center; gap:8px; padding:4px 0;
+                        border-bottom:1px solid var(--border2);" data-feature="${f.name}">
+      <span style="font-size:10px; color:var(--muted); width:18px; text-align:right;">${f.rank}</span>
+      <code style="flex:1; font-size:11px; min-width:100px; overflow:hidden; text-overflow:ellipsis;
+                   white-space:nowrap;" title="${f.name}">${f.name}</code>
+      <div style="flex:2; min-width:80px; height:6px; background:var(--border2); border-radius:3px; overflow:hidden;">
+        <div style="width:${pct}%; height:6px; background:${color}; border-radius:3px;
+                    transition:width .4s;"></div>
+      </div>
+      <span style="font-size:11px; color:${color}; font-weight:600; width:36px; text-align:right;">${pct}%</span>
+      ${corr}
+      ${badge}
+    </div>`;
+  }).join('');
+
+  results.innerHTML = `
+    <div style="border:1px solid var(--border2); border-radius:6px; overflow:hidden;">
+      <div style="padding:8px 12px; background:var(--bg3); border-bottom:1px solid var(--border2);
+                  font-size:11px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <i class="bi bi-sort-down" style="color:var(--accent);"></i>
+        <b>${features.length} features</b> ranked by relevance to
+        <code>${data.target}</code>
+        <span style="color:var(--muted);">(${data.target_type}, ${data.method}, n=${data.sample_size?.toLocaleString()})</span>
+        <button class="btn btn-sm ms-auto" style="font-size:11px; padding:1px 8px;"
+                onclick="_applyRecommended()" title="Pre-select top ${nRec} features">
+          <i class="bi bi-check2-square me-1"></i>Use Top ${nRec} Features
+        </button>
+      </div>
+      <div style="padding:8px 12px; max-height:280px; overflow-y:auto;">${rows}</div>
+    </div>`;
+}
+
+function _applyRecommended() {
+  const results  = document.getElementById('featImpResults');
+  if (!results) return;
+  // Read recommended feature names from data attributes
+  const recNames = [...results.querySelectorAll('[data-feature]')]
+    .filter(el => {
+      // match against _allFeatureSuggestions recommended
+      const name = el.dataset.feature;
+      const row  = el;
+      // Detect if the row has the "recommended" badge
+      return row.innerHTML.includes('recommended');
+    })
+    .map(el => el.dataset.feature);
+
+  // Map to feature IDs in _allFeatureSuggestions (original columns only)
+  const available = new Set(_allFeatureSuggestions.map(f => f.id));
+  const newSel    = recNames.filter(n => available.has(n));
+
+  if (!newSel.length) return;
+
+  _selectedFeatureIds = newSel;
+  _renderFeaturePills(_allFeatureSuggestions, _selectedFeatureIds);
+
+  // Flash the features section to show the update
+  const pills = document.getElementById('colPills');
+  if (pills) {
+    pills.style.transition = 'opacity .15s';
+    pills.style.opacity = '0.4';
+    setTimeout(() => { pills.style.opacity = '1'; }, 200);
+  }
+}
 
 // ── Alert filter (Columns tab) ────────────────────────────────────────────────
 
@@ -903,6 +1306,771 @@ function renderCorrMatrix(cols, matrix) {
     <span style="width:12px;height:12px;background:#58a6ff88;display:inline-block;border-radius:2px;"></span>Positive
   </div>`;
   body.innerHTML = html;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COMMENT GENERATION
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _savedComments = {};   // {column_comments: {COL: str}, table_comment: str, ...}
+
+// Auto-load saved comments on page ready
+document.addEventListener('DOMContentLoaded', () => {
+  apiFetch(`/api/comments/saved?db=${REL_DB}&schema=${REL_SCHEMA}&table=${REL_TABLE}`)
+    .then(d => { if (d.column_comments && Object.keys(d.column_comments).length) { _savedComments = d; _renderCommentSuggestions(d); } })
+    .catch(() => {});
+});
+
+async function generateComments() {
+  const btn    = document.getElementById('commentGenBtn');
+  const bar    = document.getElementById('commentStatusBar');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generating…';
+  bar.style.display = '';
+  bar.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Generating AI comment suggestions… (uses configured LLM provider)';
+
+  let jobId;
+  try {
+    const d = await apiFetch('/api/comments/generate', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({database: REL_DB, schema: REL_SCHEMA, table: REL_TABLE}),
+    });
+    jobId = d.job_id;
+  } catch (e) {
+    bar.innerHTML = `<i class="bi bi-x-circle me-1" style="color:var(--red);"></i>${e.message}`;
+    btn.disabled = false; btn.innerHTML = '<i class="bi bi-chat-square-text me-1"></i>Suggest Comments';
+    return;
+  }
+
+  const poll = setInterval(async () => {
+    try {
+      const job = await apiFetch(`/api/comments/generate/${jobId}`);
+      if (job.status === 'done') {
+        clearInterval(poll);
+        _savedComments = job;
+        _renderCommentSuggestions(job);
+        btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Re-generate';
+        document.getElementById('commentApplyBtn').style.display = '';
+        const src  = job.rule_based ? 'rule-based' : `${job.provider}: ${job.model}`;
+        const errs = job.errors?.length ? ` · ${job.errors.length} warning(s)` : '';
+        bar.innerHTML = `<i class="bi bi-check-circle me-1" style="color:var(--green);"></i>
+          <b>Suggestions ready</b> — ${src}${errs}. Review below, then click <b>Apply to DB</b>.`;
+      } else if (job.status === 'error') {
+        clearInterval(poll);
+        bar.innerHTML = `<i class="bi bi-x-circle me-1" style="color:var(--red);"></i>${job.error}`;
+        btn.disabled = false; btn.innerHTML = '<i class="bi bi-chat-square-text me-1"></i>Suggest Comments';
+      }
+    } catch { clearInterval(poll); btn.disabled = false; }
+  }, 1500);
+}
+
+function _renderCommentSuggestions(data) {
+  const cc = data.column_comments || {};
+  document.querySelectorAll('.col-comment-suggestion').forEach(el => {
+    const col  = el.dataset.col;
+    const text = cc[col];
+    if (text) {
+      el.querySelector('.suggestion-text').textContent = text;
+      el.style.display = '';
+    }
+  });
+  if (Object.keys(cc).length) {
+    document.getElementById('commentApplyBtn').style.display = '';
+  }
+}
+
+function _editSuggestion(btn) {
+  const wrap = btn.closest('.col-comment-suggestion');
+  const span = wrap.querySelector('.suggestion-text');
+  const col  = wrap.dataset.col;
+  const cur  = span.textContent;
+
+  const input = document.createElement('input');
+  input.type  = 'text';
+  input.value = cur;
+  input.className = 'form-control form-control-sm mt-1';
+  input.style.fontSize = '11px';
+  input.onblur = () => {
+    span.textContent = input.value;
+    input.replaceWith(span);
+    btn.style.display = '';
+    if (_savedComments.column_comments)
+      _savedComments.column_comments[col] = input.value;
+  };
+  input.onkeydown = e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = cur; input.blur(); } };
+
+  span.replaceWith(input);
+  btn.style.display = 'none';
+  input.focus(); input.select();
+}
+
+function showApplyModal() {
+  const cc   = (_savedComments || {}).column_comments || {};
+  const tc   = (_savedComments || {}).table_comment   || '';
+  const tbl  = `"${REL_DB}"."${REL_SCHEMA}"."${REL_TABLE}"`;
+
+  const lines = [];
+  if (tc) lines.push(`COMMENT ON TABLE ${tbl}\n  IS '${tc.replace(/'/g,"''")}';`);
+  Object.entries(cc).forEach(([col, comment]) => {
+    if (comment) lines.push(`COMMENT ON COLUMN ${tbl}."${col}"\n  IS '${comment.replace(/'/g,"''")}';`);
+  });
+
+  const preview = document.getElementById('applyPreview');
+  if (preview) preview.textContent = lines.join('\n\n') || '(no suggestions to apply)';
+  const result = document.getElementById('applyResult');
+  if (result) result.style.display = 'none';
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('applyCommentsModal')).show();
+}
+
+async function applyComments() {
+  const btn    = document.getElementById('applyConfirmBtn');
+  const result = document.getElementById('applyResult');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Applying…';
+  try {
+    const d = await apiFetch('/api/comments/apply', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({database: REL_DB, schema: REL_SCHEMA, table: REL_TABLE}),
+    });
+    if (d.skipped) {
+      result.innerHTML = `<div class="alert alert-warning py-2 mb-0 mt-2"><i class="bi bi-info-circle me-1"></i>${d.message}</div>`;
+    } else if (d.ok) {
+      result.innerHTML = `<div class="alert alert-success py-2 mb-0 mt-2">
+        <i class="bi bi-check-circle me-1"></i>${d.message}
+        <br><small>Re-profile the table to see updated comments in the report.</small></div>`;
+      btn.style.display = 'none';
+    } else {
+      const errs = (d.failed || []).map(f => `<li>${f.error}</li>`).join('');
+      result.innerHTML = `<div class="alert alert-danger py-2 mb-0 mt-2">
+        ${d.message}<ul class="mb-0 mt-1">${errs}</ul></div>`;
+    }
+    result.style.display = '';
+  } catch (e) {
+    result.innerHTML = `<div class="alert alert-danger py-2 mb-0 mt-2">${e.message}</div>`;
+    result.style.display = '';
+  }
+  btn.disabled = false;
+  if (!btn.style.display) btn.innerHTML = '<i class="bi bi-cloud-upload me-1"></i>Apply All Comments';
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CORRELATION EXPLANATION
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Auto-load saved explanation on page ready
+document.addEventListener('DOMContentLoaded', () => {
+  apiFetch(`/api/correlation/explain/saved?db=${REL_DB}&schema=${REL_SCHEMA}&table=${REL_TABLE}`)
+    .then(d => { if (d.explanation) _renderCorrExplanation(d); })
+    .catch(() => {});
+});
+
+async function runCorrExplain() {
+  const card = document.getElementById('corrExpCard');
+  const body = document.getElementById('corrExpBody');
+  const btn  = document.getElementById('corrExpBtn');
+  const rbtn = document.getElementById('corrExpRerunBtn');
+  if (card) card.style.display = '';
+  if (body) body.innerHTML = `<div style="text-align:center;padding:16px;">
+    <div class="spinner-border text-primary mb-2" style="width:1.5rem;height:1.5rem;"></div>
+    <p style="font-size:12px;color:var(--muted);">Analysing correlation patterns…</p></div>`;
+  if (btn)  { btn.disabled = true;  btn.innerHTML  = '<span class="spinner-border spinner-border-sm me-1"></span>'; }
+  if (rbtn) { rbtn.disabled = true; }
+
+  let jobId;
+  try {
+    const d = await apiFetch('/api/correlation/explain', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({database: REL_DB, schema: REL_SCHEMA, table: REL_TABLE}),
+    });
+    jobId = d.job_id;
+  } catch (e) {
+    if (body) body.innerHTML = `<div class="alert alert-danger">${e.message}</div>`;
+    if (btn)  { btn.disabled = false; btn.innerHTML = '<i class="bi bi-stars me-1"></i>Explain Correlations'; }
+    if (rbtn) rbtn.disabled = false;
+    return;
+  }
+
+  const poll = setInterval(async () => {
+    try {
+      const job = await apiFetch(`/api/correlation/explain/${jobId}`);
+      if (job.status === 'done') {
+        clearInterval(poll);
+        _renderCorrExplanation(job);
+        if (btn)  { btn.disabled = false; btn.innerHTML = '<i class="bi bi-stars me-1"></i>Explain Correlations'; }
+        if (rbtn) rbtn.disabled = false;
+      } else if (job.status === 'error') {
+        clearInterval(poll);
+        if (body) body.innerHTML = `<div class="alert alert-danger">${job.error}</div>`;
+        if (btn)  { btn.disabled = false; btn.innerHTML = '<i class="bi bi-stars me-1"></i>Explain Correlations'; }
+        if (rbtn) rbtn.disabled = false;
+      }
+    } catch { clearInterval(poll); }
+  }, 1500);
+}
+
+function _renderCorrExplanation(data) {
+  const card  = document.getElementById('corrExpCard');
+  const body  = document.getElementById('corrExpBody');
+  const badge = document.getElementById('corrExpBadge');
+  const meta  = document.getElementById('corrExpMeta');
+  const rbtn  = document.getElementById('corrExpRerunBtn');
+  const expBtn= document.getElementById('corrExpBtn');
+
+  if (card) card.style.display = '';
+  if (expBtn) expBtn.style.display = '';  // show in toolbar too
+  if (rbtn)  rbtn.style.display = '';
+
+  const d = (data.generated_at || '').slice(0, 10);
+  if (meta)  meta.textContent = d ? `Generated ${d}` : '';
+  if (badge) {
+    const rb = data.rule_based;
+    badge.textContent      = rb ? 'rule-based' : `${data.provider}: ${data.model}`;
+    badge.style.background = rb ? 'var(--border2)' : 'rgba(188,140,255,.15)';
+    badge.style.color      = rb ? 'var(--muted)'   : 'var(--purple)';
+  }
+
+  if (!body) return;
+  const text = data.explanation || '';
+  const bullets = text.split('\n').filter(l => l.trim());
+  body.innerHTML = bullets.map(line => {
+    const cleaned = line.replace(/^[•\-\*]\s*/, '');
+    return `<div style="display:flex;gap:8px;margin-bottom:8px;">
+      <i class="bi bi-arrow-right-circle-fill" style="color:var(--purple);font-size:12px;margin-top:3px;flex-shrink:0;"></i>
+      <span>${cleaned}</span>
+    </div>`;
+  }).join('');
+
+  // Also show top-pair chips below
+  const pairs = data.top_pairs || [];
+  if (pairs.length) {
+    const chipsHtml = pairs.map(([v, a, b]) => {
+      const color = Math.abs(v) >= 0.7 ? (v > 0 ? 'var(--accent)' : 'var(--red)')
+                  : Math.abs(v) >= 0.4 ? (v > 0 ? 'var(--green)' : 'var(--yellow)')
+                  : 'var(--muted)';
+      return `<span style="padding:2px 8px;border-radius:4px;border:1px solid ${color}22;
+                           background:${color}11;font-size:11px;color:${color};">
+        ${a} ↔ ${b} <b>${v > 0 ? '+' : ''}${v.toFixed(2)}</b>
+      </span>`;
+    }).join(' ');
+    body.innerHTML += `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:4px;">${chipsHtml}</div>`;
+  }
+}
+
+// Show Explain button once correlation data is loaded
+const _origApplyCorrData = _applyCorrData;
+window._applyCorrData = function(data) {
+  _origApplyCorrData(data);
+  const btn = document.getElementById('corrExpBtn');
+  if (btn) btn.style.display = '';
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AI INSIGHTS
+// ══════════════════════════════════════════════════════════════════════════════
+
+function _getInsightsEls() {
+  return {
+    btn:   document.getElementById('insightsBtn'),
+    body:  document.getElementById('insightsBody'),
+    card:  document.getElementById('insightsCard'),
+    meta:  document.getElementById('insightsMeta'),
+    badge: document.getElementById('insightsProviderBadge'),
+  };
+}
+
+async function runInsights() {
+  const { btn, body, card } = _getInsightsEls();
+  if (!body) return;
+
+  if (card) card.style.display = '';   // ensure visible
+  if (btn)  { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generating…'; }
+  body.innerHTML = `<div style="text-align:center;padding:20px;">
+    <div class="spinner-border text-primary mb-2" style="width:1.5rem;height:1.5rem;"></div>
+    <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">
+      Analysing clusters with AI…<br>
+      <small>(this may take 15–60 s depending on model)</small>
+    </p></div>`;
+
+  let jobId;
+  try {
+    const d = await apiFetch('/api/insights', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ database: REL_DB, schema: REL_SCHEMA, table: REL_TABLE }),
+    });
+    jobId = d.job_id;
+  } catch (e) {
+    body.innerHTML = `<div class="alert alert-danger" style="font-size:12px;">
+      <i class="bi bi-x-circle me-1"></i>${e.message}</div>`;
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate Insights'; }
+    return;
+  }
+
+  const poll = setInterval(async () => {
+    try {
+      const job = await apiFetch(`/api/insights/${jobId}`);
+      if (job.status === 'done') {
+        clearInterval(poll);
+        _renderInsights(job);
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Re-generate'; }
+      } else if (job.status === 'error') {
+        clearInterval(poll);
+        body.innerHTML = `<div class="alert alert-danger" style="font-size:12px;">
+          <i class="bi bi-x-circle me-1"></i><b>Insights failed:</b> ${job.error}<br>
+          <small>Rule-based insights will be used as fallback — click Re-generate.</small></div>`;
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate Insights'; }
+      }
+    } catch (e) { clearInterval(poll); if (btn) btn.disabled = false; }
+  }, 1500);
+}
+
+function _renderInsights(data) {
+  const { body, meta, badge, card, btn } = _getInsightsEls();
+  if (!body) return;
+
+  if (card) card.style.display = '';   // show card
+  if (btn && btn.innerHTML.includes('Generate'))
+    btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Re-generate';
+
+  const ruleB = data.rule_based;
+  const d     = (data.generated_at || '').slice(0, 10);
+  if (meta)  meta.textContent = d ? `Generated ${d}` : '';
+  if (badge) {
+    badge.textContent      = ruleB ? 'rule-based' : `${data.provider}: ${data.model}`;
+    badge.style.background = ruleB ? 'var(--border2)'          : 'rgba(188,140,255,.15)';
+    badge.style.color      = ruleB ? 'var(--muted)'            : 'var(--purple)';
+  }
+
+  // Global insights section
+  let html = '';
+  if (data.global_insights) {
+    const bullets = data.global_insights.split('\n').filter(l => l.trim());
+    html += `<div style="margin-bottom:16px;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;
+                  letter-spacing:.06em;color:var(--muted);margin-bottom:8px;">
+        <i class="bi bi-lightbulb me-1"></i>Key Insights
+      </div>
+      <div style="font-size:13px;line-height:1.7;color:var(--text);">
+        ${bullets.map(l => `<p style="margin:0 0 4px;">${l}</p>`).join('')}
+      </div>
+    </div>
+    <div style="height:1px;background:var(--border2);margin-bottom:14px;"></div>`;
+  }
+
+  // Per-cluster summaries
+  const ci = data.cluster_insights || {};
+  if (Object.keys(ci).length) {
+    html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;
+               letter-spacing:.06em;color:var(--muted);margin-bottom:10px;">
+      <i class="bi bi-collection me-1"></i>Per-Cluster Analysis
+    </div>`;
+    const palette = ['#58a6ff','#f85149','#3fb950','#d29922','#bc8cff',
+                     '#ff7b72','#79c0ff','#56d364','#e3b341','#d2a679'];
+    Object.entries(ci).forEach(([cid, ins], idx) => {
+      const isNoise = parseInt(cid) === -1;
+      const color   = isNoise ? '#6e7681' : palette[idx % palette.length];
+      const chars   = (ins.characteristics || []).map(c =>
+        `<span style="display:inline-block;padding:1px 8px;border-radius:3px;
+          background:${color}22;color:${color};font-size:11px;margin:2px 3px 2px 0;">${c}</span>`
+      ).join('');
+      html += `<div style="border:1px solid var(--border2);border-radius:6px;
+                           padding:12px 14px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <span class="badge" style="background:${color};">${isNoise ? 'Noise' : 'Cluster ' + cid}</span>
+          <b style="font-size:12px;">${ins.label || ''}</b>
+        </div>
+        <p style="font-size:12px;color:var(--text);margin:0 0 6px;line-height:1.5;">${ins.summary || ''}</p>
+        <div>${chars}</div>
+      </div>`;
+    });
+  }
+
+  if (data.errors?.length) {
+    html += `<details style="font-size:11px;color:var(--muted);margin-top:8px;">
+      <summary>Generation warnings (${data.errors.length})</summary>
+      <ul>${data.errors.map(e=>`<li>${e}</li>`).join('')}</ul>
+    </details>`;
+  }
+
+  body.innerHTML = html || '<p style="color:var(--muted);font-size:12px;">No insights generated.</p>';
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CLUSTERING
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _clusterModels  = null;   // fetched once from /api/clustering/models
+let _activeModel    = 'kmeans';
+let _selectedCols   = [];
+
+// ── Initialise on DOMContentLoaded ────────────────────────────────────────────
+// (append to the existing DOMContentLoaded — loaded as a separate listener)
+document.addEventListener('DOMContentLoaded', async () => {
+  // Fetch model registry and build the UI
+  try {
+    _clusterModels = await apiFetch('/api/clustering/models');
+    _buildModelTiles();
+    await _loadAutoColumns();
+    _selectModel('kmeans');
+    _buildTargetColSelect();   // populate target column selector
+  } catch {}
+
+  // Auto-load saved clustering
+  try {
+    const saved = await apiFetch(
+      `/api/clustering/saved?db=${REL_DB}&schema=${REL_SCHEMA}&table=${REL_TABLE}`
+    );
+    if (saved.n_clusters > 0) _applyClusterData(saved);
+  } catch {}
+});
+
+// ── Model tile renderer ───────────────────────────────────────────────────────
+function _buildModelTiles() {
+  if (!_clusterModels) return;
+  const container = document.getElementById('modelTiles');
+  container.innerHTML = Object.entries(_clusterModels).map(([id, m]) => `
+    <label style="flex:1; min-width:100px;">
+      <input type="radio" name="clusterModel" value="${id}" class="d-none"
+             ${id === 'kmeans' ? 'checked' : ''}
+             onchange="_selectModel('${id}')">
+      <div class="model-tile${id === 'kmeans' ? ' active' : ''}" id="tile-${id}">
+        <i class="bi ${m.icon}" style="font-size:1.2rem;"></i>
+        <div class="mt-name">${m.label}</div>
+      </div>
+    </label>`).join('');
+}
+
+function _selectModel(id) {
+  _activeModel = id;
+  document.querySelectorAll('.model-tile').forEach(t => t.classList.remove('active'));
+  const tile = document.getElementById(`tile-${id}`);
+  if (tile) tile.classList.add('active');
+  const m = _clusterModels?.[id];
+  document.getElementById('modelDesc').textContent = m?.desc || '';
+  _buildParamGrid(m?.params || []);
+}
+
+// ── Parameter grid renderer ───────────────────────────────────────────────────
+function _buildParamGrid(params) {
+  const grid = document.getElementById('paramGrid');
+  grid.innerHTML = params.map(p => {
+    let input;
+    if (p.type === 'select') {
+      input = `<select id="p-${p.id}" class="form-select form-select-sm">
+        ${p.options.map(o => `<option${o===p.default?' selected':''}>${o}</option>`).join('')}
+      </select>`;
+    } else {
+      const step = p.step ? `step="${p.step}"` : (p.type === 'float' ? 'step="0.01"' : '');
+      input = `<input type="number" id="p-${p.id}" class="form-control form-control-sm"
+                value="${p.default}" min="${p.min ?? ''}" max="${p.max ?? ''}" ${step}>`;
+    }
+    return `<div class="param-wrap">
+      <label>${p.label}</label>
+      ${input}
+      <div class="hint">${p.hint || ''}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Column pill renderer ──────────────────────────────────────────────────────
+let _allFeatureSuggestions = [];   // full suggestion list from /api/clustering/features
+let _selectedFeatureIds    = [];   // currently selected feature IDs
+
+async function _loadAutoColumns() {
+  try {
+    const d = await apiFetch(
+      `/api/clustering/features?db=${REL_DB}&schema=${REL_SCHEMA}&table=${REL_TABLE}`
+    );
+    _allFeatureSuggestions = d.features || [];
+    _selectedFeatureIds = _allFeatureSuggestions
+      .filter(f => f.selected)
+      .map(f => f.id);
+    _renderFeaturePills(_allFeatureSuggestions, _selectedFeatureIds);
+  } catch {
+    // Fallback to simple auto-columns
+    try {
+      const d = await apiFetch(
+        `/api/clustering/auto-columns?db=${REL_DB}&schema=${REL_SCHEMA}&table=${REL_TABLE}`
+      );
+      _allFeatureSuggestions = (d.columns||[]).map(c => ({
+        id: c, type: 'original', selected: true, description: c, source_cols: [c]
+      }));
+      _selectedFeatureIds = d.columns || [];
+      _renderFeaturePills(_allFeatureSuggestions, _selectedFeatureIds);
+    } catch {}
+  }
+}
+
+function _renderFeaturePills(features, selectedIds) {
+  const container = document.getElementById('colPills');
+  const counter   = document.getElementById('colSelCount');
+  const typeColors = { original:'var(--border2)', log1p:'rgba(88,166,255,.15)', ratio:'rgba(63,185,80,.1)' };
+  const typeLabels = { original:'', log1p:'log1p', ratio:'÷' };
+
+  container.innerHTML = features.map(f => {
+    const sel   = selectedIds.includes(f.id);
+    const badge = typeLabels[f.type] ? `<span style="font-size:9px;padding:0 4px;
+      border-radius:2px;background:${typeColors[f.type]||'var(--border2)'};
+      color:var(--accent);margin-left:3px;">${typeLabels[f.type]}</span>` : '';
+    return `<div class="col-pill${sel?' selected':''}"
+              onclick="_toggleFeature('${f.id}', this)"
+              title="${f.description || f.id}">
+      <i class="bi ${sel?'bi-check-square':'bi-square'}"></i>
+      ${f.id}${badge}
+    </div>`;
+  }).join('');
+
+  const selCount = selectedIds.length;
+  const total    = features.length;
+  counter.textContent = `${selCount} / ${total} features selected`;
+}
+
+function _toggleFeature(fid, el) {
+  if (_selectedFeatureIds.includes(fid)) {
+    if (_selectedFeatureIds.length <= 2) return;
+    _selectedFeatureIds = _selectedFeatureIds.filter(f => f !== fid);
+    el.classList.remove('selected');
+    el.querySelector('i').className = 'bi bi-square';
+  } else {
+    _selectedFeatureIds.push(fid);
+    el.classList.add('selected');
+    el.querySelector('i').className = 'bi bi-check-square';
+  }
+  const total = document.querySelectorAll('.col-pill').length;
+  document.getElementById('colSelCount').textContent =
+    `${_selectedFeatureIds.length} / ${total} features selected`;
+}
+
+// Legacy alias still used by older code paths
+function _toggleCol(col, el) { _toggleFeature(col, el); }
+
+// ── Read params from DOM ──────────────────────────────────────────────────────
+function _getParams() {
+  const p = {};
+  document.querySelectorAll('#paramGrid [id^="p-"]').forEach(el => {
+    const key = el.id.slice(2);
+    p[key] = el.tagName === 'SELECT' ? el.value
+           : (el.step && parseFloat(el.step) < 1 ? parseFloat(el.value) : parseInt(el.value, 10));
+  });
+  return p;
+}
+
+// ── Run clustering ────────────────────────────────────────────────────────────
+async function runClustering() {
+  const btn  = document.getElementById('clusterBtn');
+  const res  = document.getElementById('clusterResults');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Running…';
+  res.innerHTML = '<div class="empty-state"><div class="spinner-border text-primary mb-2"></div><p>Fetching data and fitting model…</p></div>';
+
+  let jobId;
+  // Separate base columns from engineered feature IDs
+  const baseColIds  = _allFeatureSuggestions.filter(f=>f.type==='original').map(f=>f.id);
+  const selFeatIds  = _selectedFeatureIds;
+
+  try {
+    const d = await apiFetch('/api/clustering', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        database:    REL_DB, schema: REL_SCHEMA, table: REL_TABLE,
+        model:       _activeModel,
+        params:      _getParams(),
+        columns:     baseColIds,
+        feature_ids: selFeatIds,
+        sample_size: parseInt(document.getElementById('sampleSize').value, 10) || 10000,
+      }),
+    });
+    jobId = d.job_id;
+  } catch (e) {
+    res.innerHTML = `<div class="alert alert-danger">${e.message}</div>`;
+    btn.disabled = false; btn.innerHTML = '<i class="bi bi-stars me-1"></i>Run Clustering';
+    return;
+  }
+
+  const poll = setInterval(async () => {
+    try {
+      const job = await apiFetch(`/api/clustering/${jobId}`);
+      if (job.status === 'done') {
+        clearInterval(poll);
+        _applyClusterData(job);
+      } else if (job.status === 'error') {
+        clearInterval(poll);
+        res.innerHTML = `<div class="alert alert-danger">${job.error}</div>`;
+        btn.disabled = false; btn.innerHTML = '<i class="bi bi-stars me-1"></i>Run Clustering';
+      }
+    } catch { clearInterval(poll); btn.disabled = false; }
+  }, 1500);
+}
+
+// ── Apply / render results ────────────────────────────────────────────────────
+function _applyClusterData(data) {
+  const btn  = document.getElementById('clusterBtn');
+  const meta = document.getElementById('clusterMeta');
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Re-run'; }
+
+  const d = (data.computed_at || '').slice(0, 10);
+  if (meta) meta.textContent = d
+    ? `${data.model_label || data.model} · ${data.n_clusters} clusters · ${(data.sample_size||0).toLocaleString()} rows · ${d}`
+    : '';
+
+  // Tab badge
+  const badge = document.getElementById('clusterTabBadge');
+  if (badge) { badge.textContent = `${data.n_clusters}k`; badge.style.display = ''; badge.style.background = 'var(--purple)'; badge.style.color = '#fff'; }
+
+  renderClusterResults(data);
+
+  // Auto-load saved insights and show the card immediately
+  const insCard = document.getElementById('insightsCard');
+  if (insCard) insCard.style.display = '';
+  apiFetch(`/api/insights/saved?db=${REL_DB}&schema=${REL_SCHEMA}&table=${REL_TABLE}`)
+    .then(ins => { if (ins.generated_at) _renderInsights(ins); })
+    .catch(() => {});
+}
+
+function renderClusterResults(data) {
+  const res = document.getElementById('clusterResults');
+  if (!data || !data.cluster_stats) {
+    res.innerHTML = '<div class="empty-state"><i class="bi bi-stars"></i><p>No results yet.</p></div>';
+    return;
+  }
+
+  // ── Quality metrics ──────────────────────────────────────────────────────
+  const m = data.metrics || {};
+  const silhouette = m.silhouette_score;
+  const db_score   = m.davies_bouldin_score;
+  const ch_score   = m.calinski_harabasz_score;
+
+  const silColor = silhouette == null ? 'var(--muted)'
+    : silhouette > 0.5 ? 'var(--green)' : silhouette > 0.25 ? 'var(--yellow)' : 'var(--red)';
+  const dbColor  = db_score == null ? 'var(--muted)'
+    : db_score < 1 ? 'var(--green)' : db_score < 2 ? 'var(--yellow)' : 'var(--red)';
+
+  let metricsHtml = `<div class="d-flex gap-2 flex-wrap mb-3">`;
+  metricsHtml += `<div class="metric-chip">
+    <div class="mv" style="color:${silColor};">${silhouette != null ? silhouette.toFixed(3) : '—'}</div>
+    <div class="ml">Silhouette</div>
+    <div class="mh">-1→1 · higher = better</div>
+  </div>`;
+  metricsHtml += `<div class="metric-chip">
+    <div class="mv" style="color:${dbColor};">${db_score != null ? db_score.toFixed(3) : '—'}</div>
+    <div class="ml">Davies-Bouldin</div>
+    <div class="mh">lower = better</div>
+  </div>`;
+  metricsHtml += `<div class="metric-chip">
+    <div class="mv" style="color:var(--accent);">${ch_score != null ? ch_score.toLocaleString() : '—'}</div>
+    <div class="ml">Calinski-Harabász</div>
+    <div class="mh">higher = better</div>
+  </div>`;
+  if (m.noise_points) {
+    metricsHtml += `<div class="metric-chip">
+      <div class="mv" style="color:var(--muted);">${m.noise_pct?.toFixed(1)}%</div>
+      <div class="ml">Noise (DBSCAN)</div>
+      <div class="mh">${m.noise_points.toLocaleString()} points</div>
+    </div>`;
+  }
+  metricsHtml += `</div>`;
+
+  // ── Summary line ─────────────────────────────────────────────────────────
+  const ev = (data.pca_explained_variance || []).map(v => (v*100).toFixed(1)+'%');
+  const summaryLine = `<div style="font-size:11px;color:var(--muted);margin-bottom:12px;">
+    <b style="color:var(--text);">${data.n_clusters}</b> clusters &nbsp;·&nbsp;
+    <b style="color:var(--text);">${(data.columns_used||[]).length}</b> features used &nbsp;·&nbsp;
+    <b style="color:var(--text);">${(data.sample_size||0).toLocaleString()}</b> rows &nbsp;·&nbsp;
+    PCA: ${ev.join(', ')}
+  </div>`;
+
+  // ── Scatter chart ─────────────────────────────────────────────────────────
+  const scatter = data.scatter || {};
+  const canvasId = 'clusterScatter_' + Date.now();
+  const scatterHtml = `
+    <div class="card mb-3">
+      <div class="card-header">
+        <i class="bi bi-distribute-vertical me-1"></i>
+        2-D PCA Projection — ${scatter.x_label || 'PC1'} vs ${scatter.y_label || 'PC2'}
+      </div>
+      <div class="card-body" style="position:relative; height:400px;">
+        <canvas id="${canvasId}"></canvas>
+      </div>
+    </div>`;
+
+  // ── Cluster stats table ───────────────────────────────────────────────────
+  const stats   = data.cluster_stats || [];
+  const cols    = data.columns_used  || [];
+  const palette = ['#58a6ff','#f85149','#3fb950','#d29922','#bc8cff',
+                   '#ff7b72','#79c0ff','#56d364','#e3b341','#d2a679',
+                   '#54aeff','#fb8500','#90e0ef','#b5e48c','#e9c46a'];
+
+  let tHead = `<tr><th>#</th><th>Size</th><th>%</th>`;
+  cols.slice(0, 10).forEach(c => { tHead += `<th>${c}</th>`; });
+  tHead += `</tr>`;
+
+  let tBody = '';
+  stats.forEach((s, si) => {
+    const color = s.cluster === -1 ? '#6e7681' : palette[si % palette.length];
+    tBody += `<tr>
+      <td><span class="badge" style="background:${color};">${s.cluster === -1 ? 'Noise' : s.cluster}</span></td>
+      <td style="font-variant-numeric:tabular-nums;">${s.size.toLocaleString()}</td>
+      <td style="font-variant-numeric:tabular-nums;">${s.pct.toFixed(1)}%</td>`;
+    cols.slice(0, 10).forEach(c => {
+      const v = s.centroid?.[c];
+      tBody += `<td style="font-variant-numeric:tabular-nums;">${v != null ? v.toFixed(3) : '—'}</td>`;
+    });
+    tBody += `</tr>`;
+  });
+
+  const statsHtml = `
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-table me-1"></i>Cluster Centroids</div>
+      <div style="overflow-x:auto;">
+        <table class="table table-sm" style="font-size:11px;">
+          <thead>${tHead}</thead>
+          <tbody>${tBody}</tbody>
+        </table>
+      </div>
+    </div>`;
+
+  // Cluster results (no insights card here — it lives permanently in the DOM)
+  res.innerHTML = metricsHtml + summaryLine + scatterHtml + statsHtml;
+
+  // Show the persistent insights card and auto-load any saved insights
+  const insCard = document.getElementById('insightsCard');
+  if (insCard) insCard.style.display = '';
+  apiFetch(`/api/insights/saved?db=${REL_DB}&schema=${REL_SCHEMA}&table=${REL_TABLE}`)
+    .then(d => { if (d.generated_at) _renderInsights(d); })
+    .catch(() => {});
+
+  // Build Chart.js scatter after DOM update
+  requestAnimationFrame(() => {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    const datasets = (scatter.datasets || []).map(ds => ({
+      label:           ds.label,
+      data:            ds.points,
+      backgroundColor: ds.color + 'aa',
+      pointRadius:     2,
+      pointHoverRadius: 5,
+    }));
+    new Chart(ctx, {
+      type: 'scatter',
+      data: { datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: false,
+        plugins: {
+          legend: { display: true, position: 'right',
+                    labels: { color: '#8b949e', font: { size: 11 }, boxWidth: 10 } },
+          tooltip: { callbacks: {
+            label: ctx => `(${ctx.parsed.x.toFixed(3)}, ${ctx.parsed.y.toFixed(3)})`
+          }},
+        },
+        scales: {
+          x: { grid: { color: '#21262d' }, ticks: { color: '#8b949e', font: { size: 10 } },
+               title: { display: true, text: scatter.x_label || 'PC1', color: '#8b949e', font: { size: 11 } } },
+          y: { grid: { color: '#21262d' }, ticks: { color: '#8b949e', font: { size: 10 } },
+               title: { display: true, text: scatter.y_label || 'PC2', color: '#8b949e', font: { size: 11 } } },
+        },
+      },
+    });
+  });
 }
 </script>
 {% endblock %}
