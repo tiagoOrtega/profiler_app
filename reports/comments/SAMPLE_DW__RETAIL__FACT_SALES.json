@@ -1,0 +1,27 @@
+{
+  "table_comment": "Fact table for sales data, containing key FKs to customer, product, and store dimensions.",
+  "column_comments": {
+    "SALE_KEY": "Unique identifier for each sale (dimension: Sales)",
+    "DATE_KEY": "Date of sale (dimension: Dates)",
+    "CUSTOMER_KEY": "Customer ID (dimension: Customers)",
+    "PRODUCT_KEY": "Product ID (dimension: Products)",
+    "STORE_KEY": "Store ID (dimension: Stores)",
+    "EMPLOYEE_KEY": "Employee ID (dimension: Employees)",
+    "PROMOTION_KEY": "Promotion ID (dimension: Promotions)",
+    "TRANSACTION_ID": "Business/natural key. Stable identifier for cross-system joins.",
+    "PAYMENT_METHOD": "Method or approach indicator. 5 distinct values.",
+    "QUANTITY": "Quantity sold",
+    "UNIT_PRICE": "Unit price in USD, typically between $3.56 and $2111.40",
+    "UNIT_COST": "Unit cost in USD, typically between $2.00 and $1173.00",
+    "DISCOUNT_AMOUNT": "Discount amount in USD, typically between $0.00 and $4328.37",
+    "GROSS_AMOUNT": "Gross amount in USD, typically between $3.56 and $12668.40",
+    "NET_AMOUNT": "Net amount in USD, typically between $2.28 and $12668.40",
+    "TAX_AMOUNT": "Tax amount in USD, typically between $0.18 and $1013.47",
+    "MARGIN_AMOUNT": "Margin amount in USD, typically between $0.68 and $5630.40"
+  },
+  "rule_based": false,
+  "provider": "ollama",
+  "model": "llama3.2",
+  "errors": [],
+  "generated_at": "2026-06-10T09:26:46.159139"
+}

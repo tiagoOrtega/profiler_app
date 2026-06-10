@@ -478,7 +478,7 @@
       <div class="empty-state">
         <i class="bi bi-diagram-3"></i>
         <p>Click <b>Run Tests</b> to detect FK-like column references across profiled tables.<br>
-        <small>Compares same-named columns using Snowflake EXCEPT queries.</small></p>
+        <small>Compares same-named columns using EXCEPT set-operation queries in the source.</small></p>
       </div>
     </div>
   </div>
@@ -502,7 +502,7 @@
       <div class="empty-state">
         <i class="bi bi-grid-3x3"></i>
         <p>Click <b>Run Correlation</b> to compute Pearson coefficients for all numeric columns.<br>
-        <small>Runs a single query in Snowflake — no data leaves the warehouse.</small></p>
+        <small>Runs a single query in the source — no data leaves the warehouse.</small></p>
       </div>
     </div>
 
@@ -570,7 +570,12 @@
               onclick="runClustering()">
         <i class="bi bi-stars me-1"></i>Run Clustering
       </button>
+      <button id="saveSettingsBtn" type="button" class="btn btn-sm btn-outline-secondary"
+              onclick="saveClusterSettings()" title="Save model, parameters and feature selection without re-running">
+        <i class="bi bi-floppy me-1"></i>Save Settings
+      </button>
       <span id="clusterMeta" style="font-size:11px; color:var(--muted);"></span>
+      <span id="saveSettingsStatus" style="font-size:11px; display:none;"></span>
     </div>
 
     <!-- Config card -->
@@ -953,69 +958,92 @@ function _renderFeatureImportance(data) {
   const nRec     = data.n_recommended || 0;
   const isCat    = data.target_type === 'categorical';
 
-  // Feature type badges
+  // Feature type badge
   const typeBadge = ftype => {
-    if (ftype === 'log1p') return `<span style="font-size:9px;padding:0 4px;border-radius:2px;
-      background:rgba(88,166,255,.15);color:var(--accent);">log1p</span>`;
-    if (ftype === 'ratio') return `<span style="font-size:9px;padding:0 4px;border-radius:2px;
-      background:rgba(63,185,80,.12);color:var(--green);">ratio</span>`;
+    if (ftype === 'log1p') return `<span style="font-size:9px;padding:1px 5px;border-radius:3px;
+      background:rgba(88,166,255,.18);color:#79c0ff;font-weight:600;">log1p</span>`;
+    if (ftype === 'ratio') return `<span style="font-size:9px;padding:1px 5px;border-radius:3px;
+      background:rgba(63,185,80,.18);color:#56d364;font-weight:600;">÷</span>`;
     return '';
   };
 
   const rows = features.map(f => {
-    const pct   = (f.combined_score * 100).toFixed(0);
-    const color = f.combined_score >= 0.6 ? 'var(--green)'
-                : f.combined_score >= 0.3 ? 'var(--accent)'
-                : f.combined_score >= 0.1 ? 'var(--yellow)'
-                : 'var(--muted)';
-    const corr  = (!isCat && f.corr_score !== null)
-      ? `<span style="font-size:10px;color:var(--muted);white-space:nowrap;">r=${f.corr_score.toFixed(2)}</span>`
+    const pct      = (f.combined_score * 100).toFixed(0);
+    const barColor = f.combined_score >= 0.6 ? 'var(--green)'
+                   : f.combined_score >= 0.3 ? 'var(--accent)'
+                   : f.combined_score >= 0.1 ? 'var(--yellow)'
+                   : '#6e7681';
+    const corr   = (!isCat && f.corr_score !== null)
+      ? `<span style="font-size:10px;color:#8b949e;white-space:nowrap;">r=${f.corr_score.toFixed(2)}</span>`
       : '';
-    // Store recommended as data attribute — used by _applyRecommended()
-    return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;
-                        border-bottom:1px solid var(--border2);"
+
+    // Is this feature currently selected for clustering?
+    const inSel   = _selectedFeatureIds.includes(f.name);
+    const toggleColor = inSel ? '#f85149' : '#3fb950';
+    const toggleIcon  = inSel ? 'bi-dash-circle-fill' : 'bi-plus-circle-fill';
+    const toggleTitle = inSel ? 'Remove from clustering' : 'Add to clustering';
+
+    return `<div style="display:flex;align-items:center;gap:7px;padding:5px 0;
+                        border-bottom:1px solid #21262d;
+                        background:${inSel ? 'rgba(63,185,80,.04)' : 'transparent'};"
                 data-feature="${f.name}"
                 data-recommended="${f.recommended ? '1' : '0'}">
-      <span style="font-size:10px;color:var(--muted);width:18px;text-align:right;">${f.rank}</span>
-      <span style="flex:1;font-family:monospace;font-size:11px;overflow:hidden;
-                   text-overflow:ellipsis;white-space:nowrap;" title="${f.name}">
-        ${f.name} ${typeBadge(f.feat_type || '')}
-      </span>
-      <div style="flex:2;min-width:70px;height:6px;background:var(--border2);
-                  border-radius:3px;overflow:hidden;">
-        <div style="width:${pct}%;height:6px;background:${color};
-                    border-radius:3px;transition:width .4s;"></div>
+      <!-- rank -->
+      <span style="font-size:10px;color:#6e7681;width:16px;text-align:right;flex-shrink:0;">${f.rank}</span>
+      <!-- name -->
+      <span style="flex:1;font-family:monospace;font-size:11px;color:#e6edf3;
+                   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:80px;"
+            title="${f.name}">${f.name} ${typeBadge(f.feat_type || '')}</span>
+      <!-- bar -->
+      <div style="flex:2;min-width:60px;height:5px;background:#21262d;
+                  border-radius:3px;overflow:hidden;flex-shrink:1;">
+        <div style="width:${pct}%;height:5px;background:${barColor};
+                    border-radius:3px;transition:width .5s;"></div>
       </div>
-      <span style="font-size:11px;color:${color};font-weight:700;
-                   width:34px;text-align:right;">${pct}%</span>
+      <!-- score -->
+      <span style="font-size:11px;color:${barColor};font-weight:700;
+                   width:32px;text-align:right;flex-shrink:0;">${pct}%</span>
+      <!-- corr -->
       ${corr}
+      <!-- rec badge -->
       ${f.recommended
-        ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;
-                background:rgba(63,185,80,.15);color:var(--green);white-space:nowrap;">★ rec</span>`
-        : `<span style="font-size:9px;padding:1px 5px;border-radius:3px;
-                background:var(--border2);color:var(--muted);white-space:nowrap;">skip</span>`}
+        ? `<span style="font-size:9px;padding:1px 6px;border-radius:3px;flex-shrink:0;
+                        background:rgba(63,185,80,.18);color:#3fb950;font-weight:600;">★</span>`
+        : `<span style="font-size:9px;padding:1px 6px;border-radius:3px;flex-shrink:0;
+                        background:#21262d;color:#6e7681;">—</span>`}
+      <!-- add/remove toggle -->
+      <button onclick="_toggleFeatFromGrid('${f.name}', this)"
+              title="${toggleTitle}"
+              style="background:none;border:none;padding:0 2px;cursor:pointer;
+                     color:${toggleColor};flex-shrink:0;line-height:1;font-size:14px;">
+        <i class="bi ${toggleIcon}"></i>
+      </button>
     </div>`;
   }).join('');
 
-  // Colour legend
+  // Legend
   const legend = `
-    <div style="display:flex;gap:14px;flex-wrap:wrap;padding:8px 12px;
-                border-top:1px solid var(--border2);font-size:10px;color:var(--muted);">
-      <span style="font-weight:600;color:var(--text);">Legend:</span>
-      <span><span style="display:inline-block;width:10px;height:10px;
-                          background:var(--green);border-radius:2px;margin-right:4px;"></span>≥60% High</span>
-      <span><span style="display:inline-block;width:10px;height:10px;
-                          background:var(--accent);border-radius:2px;margin-right:4px;"></span>≥30% Medium</span>
-      <span><span style="display:inline-block;width:10px;height:10px;
-                          background:var(--yellow);border-radius:2px;margin-right:4px;"></span>≥10% Low</span>
-      <span><span style="display:inline-block;width:10px;height:10px;
-                          background:var(--muted);border-radius:2px;margin-right:4px;"></span>&lt;10% Noise</span>
-      <span style="margin-left:8px;">
-        <span style="font-size:9px;padding:0 4px;border-radius:2px;
-               background:rgba(88,166,255,.15);color:var(--accent);">log1p</span> log-transform</span>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;padding:8px 12px;
+                border-top:1px solid #21262d;font-size:10px;color:#8b949e;">
+      <span style="font-weight:600;color:#e6edf3;">Legend:</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:var(--green);
+                         border-radius:2px;margin-right:3px;vertical-align:middle;"></span>
+            <span style="color:#e6edf3;">≥60%</span> High</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:var(--accent);
+                         border-radius:2px;margin-right:3px;vertical-align:middle;"></span>
+            <span style="color:#e6edf3;">≥30%</span> Medium</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:var(--yellow);
+                         border-radius:2px;margin-right:3px;vertical-align:middle;"></span>
+            <span style="color:#e6edf3;">≥10%</span> Low</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:#6e7681;
+                         border-radius:2px;margin-right:3px;vertical-align:middle;"></span>
+            <span style="color:#e6edf3;">&lt;10%</span> Noise</span>
+      <span style="margin-left:6px;">
+        <i class="bi bi-plus-circle-fill" style="color:#3fb950;"></i>
+        <span style="color:#e6edf3;"> add</span></span>
       <span>
-        <span style="font-size:9px;padding:0 4px;border-radius:2px;
-               background:rgba(63,185,80,.12);color:var(--green);">ratio</span> ratio feature</span>
+        <i class="bi bi-dash-circle-fill" style="color:#f85149;"></i>
+        <span style="color:#e6edf3;"> remove</span> from clustering</span>
     </div>`;
 
   container.innerHTML = `
@@ -1075,6 +1103,48 @@ function _applyRecommended() {
     pills.style.opacity = '0.35';
     setTimeout(() => { pills.style.opacity = '1'; }, 220);
   }
+}
+
+// ── Toggle a single feature from the importance grid ─────────────────────────
+function _toggleFeatFromGrid(featureName, btn) {
+  const idx    = _selectedFeatureIds.indexOf(featureName);
+  const adding = idx < 0;
+
+  if (!adding && _selectedFeatureIds.length <= 2) {
+    // Visual feedback instead of alert
+    btn.style.transform = 'scale(1.4)';
+    setTimeout(() => { btn.style.transform = ''; }, 200);
+    return;
+  }
+
+  if (adding) {
+    // Ensure the feature exists in suggestions so the pill renders
+    if (!_allFeatureSuggestions.some(f => f.id === featureName)) {
+      const ftype = featureName.startsWith('log1p_') ? 'log1p'
+                  : featureName.startsWith('ratio_') ? 'ratio' : 'original';
+      _allFeatureSuggestions.push({
+        id: featureName, type: ftype, selected: false,
+        description: featureName, source_cols: [],
+      });
+    }
+    _selectedFeatureIds.push(featureName);
+  } else {
+    _selectedFeatureIds.splice(idx, 1);
+  }
+
+  // Update this row's button immediately (no full re-render needed)
+  const nowIn = _selectedFeatureIds.includes(featureName);
+  const icon  = btn.querySelector('i');
+  if (icon)  icon.className = nowIn ? 'bi bi-dash-circle-fill' : 'bi bi-plus-circle-fill';
+  btn.style.color  = nowIn ? '#f85149' : '#3fb950';
+  btn.title        = nowIn ? 'Remove from clustering' : 'Add to clustering';
+
+  // Highlight/un-highlight the row
+  const row = btn.closest('[data-feature]');
+  if (row) row.style.background = nowIn ? 'rgba(63,185,80,.04)' : 'transparent';
+
+  // Sync feature pills
+  _renderFeaturePills(_allFeatureSuggestions, _selectedFeatureIds);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1272,7 +1342,7 @@ async function runRelTests() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Running…';
   document.getElementById('relContent').innerHTML =
-    '<div class="empty-state"><div class="spinner-border text-primary mb-2"></div><p>Querying Snowflake…</p></div>';
+    '<div class="empty-state"><div class="spinner-border text-primary mb-2"></div><p>Querying source…</p></div>';
 
   let jobId;
   try {
@@ -1788,13 +1858,17 @@ function _renderCorrExplanation(data) {
   if (!body) return;
   const text = data.explanation || '';
   const bullets = text.split('\n').filter(l => l.trim());
-  body.innerHTML = bullets.map(line => {
-    const cleaned = line.replace(/^[•\-\*]\s*/, '');
-    return `<div style="display:flex;gap:8px;margin-bottom:8px;">
-      <i class="bi bi-arrow-right-circle-fill" style="color:var(--purple);font-size:12px;margin-top:3px;flex-shrink:0;"></i>
-      <span>${cleaned}</span>
-    </div>`;
-  }).join('');
+  body.innerHTML = `<div style="font-size:13px; line-height:1.7; color:#e6edf3;">` +
+    bullets.map(line => {
+      const cleaned = line.replace(/^[•\-\*→]\s*/, '');
+      // Bold any text before a colon (like "Strong correlation: ...")
+      const formatted = cleaned.replace(/^([^:]+:)/, '<b>$1</b>');
+      return `<div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-start;">
+        <i class="bi bi-arrow-right-circle-fill"
+           style="color:#bc8cff;font-size:13px;margin-top:2px;flex-shrink:0;"></i>
+        <span style="color:#e6edf3;">${formatted}</span>
+      </div>`;
+    }).join('') + '</div>';
 
   // Also show top-pair chips below
   const pairs = data.top_pairs || [];
@@ -1803,9 +1877,12 @@ function _renderCorrExplanation(data) {
       const color = Math.abs(v) >= 0.7 ? (v > 0 ? 'var(--accent)' : 'var(--red)')
                   : Math.abs(v) >= 0.4 ? (v > 0 ? 'var(--green)' : 'var(--yellow)')
                   : 'var(--muted)';
-      return `<span style="padding:2px 8px;border-radius:4px;border:1px solid ${color}22;
-                           background:${color}11;font-size:11px;color:${color};">
-        ${a} ↔ ${b} <b>${v > 0 ? '+' : ''}${v.toFixed(2)}</b>
+      return `<span style="padding:3px 9px;border-radius:4px;border:1px solid ${color}44;
+                           background:${color}18;font-size:11px;color:#e6edf3;white-space:nowrap;">
+        <span style="color:${color};font-weight:600;">${a}</span>
+        <span style="color:#8b949e;"> ↔ </span>
+        <span style="color:${color};font-weight:600;">${b}</span>
+        <b style="color:${color};"> ${v > 0 ? '+' : ''}${v.toFixed(2)}</b>
       </span>`;
     }).join(' ');
     body.innerHTML += `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:4px;">${chipsHtml}</div>`;
@@ -1970,14 +2047,114 @@ document.addEventListener('DOMContentLoaded', async () => {
     _buildTargetColSelect();   // populate target column selector
   } catch {}
 
-  // Auto-load saved clustering
+  // Auto-load saved clustering AND restore the last-used config
   try {
     const saved = await apiFetch(
       `/api/clustering/saved?db=${REL_DB}&schema=${REL_SCHEMA}&table=${REL_TABLE}`
     );
     if (saved.n_clusters > 0) _applyClusterData(saved);
+    // Always restore config even if results exist — restores model/params/features
+    if (saved.config) _restoreClusterConfig(saved.config);
   } catch {}
 });
+
+// ── Restore saved configuration ───────────────────────────────────────────────
+
+function _restoreClusterConfig(config) {
+  if (!config) return;
+
+  // 1 — Model
+  if (config.model && _clusterModels?.[config.model]) {
+    _selectModel(config.model);
+    const radio = document.querySelector(`input[name="clusterModel"][value="${config.model}"]`);
+    if (radio) radio.checked = true;
+  }
+
+  // 2 — Parameters (set after _selectModel rebuilds the grid)
+  if (config.params && Object.keys(config.params).length) {
+    // Use a short delay so _buildParamGrid() has finished rendering
+    requestAnimationFrame(() => {
+      Object.entries(config.params).forEach(([key, val]) => {
+        const el = document.getElementById(`p-${key}`);
+        if (!el) return;
+        if (el.tagName === 'SELECT') el.value = String(val);
+        else el.value = val;
+      });
+    });
+  }
+
+  // 3 — Feature IDs (includes engineered features)
+  if (config.feature_ids?.length) {
+    _selectedFeatureIds = [...config.feature_ids];
+    // Ensure any engineered IDs exist in suggestions
+    config.feature_ids.forEach(id => {
+      if (!_allFeatureSuggestions.some(f => f.id === id)) {
+        const ftype = id.startsWith('log1p_') ? 'log1p'
+                    : id.startsWith('ratio_') ? 'ratio' : 'original';
+        _allFeatureSuggestions.push({
+          id, type: ftype, selected: true, description: id, source_cols: [],
+        });
+      }
+    });
+    if (_allFeatureSuggestions.length)
+      _renderFeaturePills(_allFeatureSuggestions, _selectedFeatureIds);
+  }
+
+  // 4 — Sample size
+  if (config.sample_size) {
+    const el = document.getElementById('sampleSize');
+    if (el) el.value = config.sample_size;
+  }
+
+  // 5 — Target column (for Feature Relevance)
+  if (config.target_col) {
+    const el = document.getElementById('targetColSelect');
+    if (el) {
+      // Option may not exist yet if _buildTargetColSelect hasn't run;
+      // set the value anyway — browser will apply when options are added
+      el.value = config.target_col;
+      // Also try after a frame in case the select isn't built yet
+      requestAnimationFrame(() => { el.value = config.target_col; });
+    }
+  }
+}
+
+// ── Save current settings without re-running ──────────────────────────────────
+
+async function saveClusterSettings() {
+  const btn    = document.getElementById('saveSettingsBtn');
+  const status = document.getElementById('saveSettingsStatus');
+  btn.disabled = true;
+
+  const config = {
+    model:       _activeModel,
+    params:      _getParams(),
+    feature_ids: [..._selectedFeatureIds],
+    sample_size: parseInt(document.getElementById('sampleSize')?.value || '10000'),
+    target_col:  document.getElementById('targetColSelect')?.value || '',
+  };
+
+  try {
+    await apiFetch('/api/clustering/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        database: REL_DB, schema: REL_SCHEMA, table: REL_TABLE, config,
+      }),
+    });
+    // Brief success feedback
+    status.textContent   = '✓ Settings saved';
+    status.style.display = '';
+    status.style.color   = 'var(--green)';
+    setTimeout(() => { status.style.display = 'none'; }, 2500);
+  } catch (e) {
+    status.textContent   = `✗ ${e.message}`;
+    status.style.display = '';
+    status.style.color   = 'var(--red)';
+    setTimeout(() => { status.style.display = 'none'; }, 4000);
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 // ── Model tile renderer ───────────────────────────────────────────────────────
 function _buildModelTiles() {
@@ -2133,6 +2310,7 @@ async function runClustering() {
         columns:     baseColIds,
         feature_ids: selFeatIds,
         sample_size: parseInt(document.getElementById('sampleSize').value, 10) || 10000,
+        target_col:  document.getElementById('targetColSelect')?.value || '',
       }),
     });
     jobId = d.job_id;

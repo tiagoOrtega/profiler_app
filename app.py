@@ -1,4 +1,4 @@
-"""Flask web app — Snowflake Profiler config editor + HTML report viewer."""
+"""DataLens — multi-platform data profiling, ML clustering and AI insights web app."""
 
 import dataclasses
 import json
@@ -732,14 +732,14 @@ def _save_cluster_file(cfg, db: str, schema: str, table: str, data: dict) -> Non
 def _run_cluster_job(
     job_id: str, db: str, schema: str, table: str,
     model_name: str, params: dict, columns: list,
-    feature_ids: list, sample_size: int,
+    feature_ids: list, sample_size: int, target_col: str = "",
 ) -> None:
     _cluster_jobs[job_id]["status"] = "running"
     try:
         from datetime import datetime as _dt
-        cfg     = _cfg()
-        engine  = ClusteringEngine(_get_platform(cfg), _reports_dir(cfg))
-        result  = engine.run(
+        cfg    = _cfg()
+        engine = ClusteringEngine(_get_platform(cfg), _reports_dir(cfg))
+        result = engine.run(
             db, schema, table,
             model_name=model_name,
             params=params,
@@ -754,6 +754,15 @@ def _run_cluster_job(
             "table":       table,
             "source_name": cfg.source_name,
             "computed_at": _dt.now().isoformat(),
+            # ── Persisted configuration ──────────────────────────────────────
+            # Restored on next page open so the user never loses their setup.
+            "config": {
+                "model":       model_name,
+                "params":      params,
+                "feature_ids": feature_ids or [],
+                "sample_size": sample_size,
+                "target_col":  target_col,
+            },
         }
         _save_cluster_file(cfg, db, schema, table, save_data)
         _cluster_jobs[job_id].update({"status": "done", **save_data})
@@ -795,6 +804,7 @@ def api_run_clustering():
     columns     = body.get("columns",     [])
     feature_ids = body.get("feature_ids", [])
     sample_size = int(body.get("sample_size", 10_000))
+    target_col  = body.get("target_col",  "").strip()
 
     if not all([db, schema, table]):
         return jsonify({"error": "database, schema and table are required"}), 400
@@ -805,10 +815,37 @@ def api_run_clustering():
     _cluster_jobs[job_id] = {"status": "pending", "error": None}
     threading.Thread(
         target=_run_cluster_job,
-        args=(job_id, db, schema, table, model_name, params, columns, feature_ids, sample_size),
+        args=(job_id, db, schema, table, model_name, params, columns,
+              feature_ids, sample_size, target_col),
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id})
+
+
+@app.route("/api/clustering/config", methods=["POST"])
+def api_save_cluster_config():
+    """Save clustering configuration without re-running the model."""
+    body   = request.get_json(silent=True) or {}
+    db     = body.get("database", "").strip()
+    schema = body.get("schema",   "").strip()
+    table  = body.get("table",    "").strip()
+    config = body.get("config",   {})
+    if not all([db, schema, table]):
+        return jsonify({"error": "database, schema and table are required"}), 400
+
+    cfg  = _cfg()
+    path = _cluster_saved_path(cfg, db.upper(), schema.upper(), table.upper())
+
+    # Load existing results (keep them) and just update the config section
+    existing = {}
+    if path.exists():
+        with open(path) as f:
+            existing = json.load(f)
+    existing["config"] = config
+    with open(path, "w") as f:
+        json.dump(existing, f, indent=2, default=str)
+
+    return jsonify({"ok": True, "saved": config})
 
 
 @app.route("/api/clustering/<job_id>")

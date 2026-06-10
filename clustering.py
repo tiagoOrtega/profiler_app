@@ -144,13 +144,41 @@ class FeatureEngineer:
             # Suggest log transform for skewed columns
             if skew > self.SKEW_THRESHOLD and (col_data >= 0).all():
                 suggestions.append({
-                    "id":          f"log1p_{col}",
+                    "id":          f"log_{col}",
                     "type":        "log1p",
-                    "description": f"log(1 + {col}) — reduces right-skew ({skew:.2f} → ~0)",
+                    "description": f"log(1 + {col})  — compresses right-skew ({skew:.2f} → ~0)",
                     "source_cols": [col],
                     "selected":    skew > 2.0,   # auto-select if very skewed
                     "skewness":    round(skew, 3),
                 })
+
+            # Quartile bin: always suggest — useful for skewed and multimodal columns
+            suggestions.append({
+                "id":          f"{col}_Q",
+                "type":        "quartile_bin",
+                "description": f"Quartile rank of {col}  (1=bottom 25% … 4=top 25%)",
+                "source_cols": [col],
+                "selected":    False,
+                "skewness":    round(skew, 3),
+            })
+
+            # Outlier flag: suggest when column has measurable outlier mass
+            col_std = float(col_data.std()) if len(col_data) > 1 else 0.0
+            if col_std > 0:
+                z_scores    = np.abs((col_data - col_data.mean()) / col_std)
+                outlier_pct = float(np.mean(z_scores > 2))
+                if outlier_pct > 0.01:
+                    suggestions.append({
+                        "id":          f"{col}_out",
+                        "type":        "outlier_flag",
+                        "description": (
+                            f"1 if {col} is an outlier (|z|>2)  "
+                            f"— {outlier_pct:.1%} of values flagged"
+                        ),
+                        "source_cols": [col],
+                        "selected":    False,
+                        "skewness":    round(skew, 3),
+                    })
 
         # ── Ratio features ───────────────────────────────────────────────────
         ratio_count = 0
@@ -162,11 +190,11 @@ class FeatureEngineer:
                     break
                 if not self._are_ratio_candidates(a, b):
                     continue
-                feat_id = f"ratio_{a}_over_{b}"
+                feat_id = f"{a}_div_{b}"
                 suggestions.append({
                     "id":          feat_id,
                     "type":        "ratio",
-                    "description": f"{a} / {b} — relative proportion",
+                    "description": f"{a} ÷ {b}  — relative proportion / margin",
                     "source_cols": [a, b],
                     "selected":    False,
                     "skewness":    None,
@@ -213,6 +241,33 @@ class FeatureEngineer:
                     denom[np.abs(denom) < 1e-9] = np.nan
                     ratio = self.X[:, ai] / denom
                     out_cols.append(ratio)
+                    out_names.append(fid)
+
+            elif s["type"] == "quartile_bin":
+                ci = col_idx.get(s["source_cols"][0])
+                if ci is not None:
+                    col  = self.X[:, ci].copy()
+                    q25, q50, q75 = np.nanquantile(col, [0.25, 0.50, 0.75])
+                    bins = np.ones(len(col), dtype=np.float64)
+                    bins[col > q25] = 2.0
+                    bins[col > q50] = 3.0
+                    bins[col > q75] = 4.0
+                    bins[np.isnan(col)] = np.nan
+                    out_cols.append(bins)
+                    out_names.append(fid)
+
+            elif s["type"] == "outlier_flag":
+                ci = col_idx.get(s["source_cols"][0])
+                if ci is not None:
+                    col  = self.X[:, ci].copy()
+                    mean = np.nanmean(col)
+                    std  = np.nanstd(col)
+                    if std > 0:
+                        flag = (np.abs((col - mean) / std) > 2).astype(np.float64)
+                    else:
+                        flag = np.zeros(len(col), dtype=np.float64)
+                    flag[np.isnan(col)] = np.nan
+                    out_cols.append(flag)
                     out_names.append(fid)
 
         if not out_cols:
@@ -346,41 +401,115 @@ class ClusteringEngine:
 
     def _fetch_sample(
         self, db: str, schema: str, table: str,
-        columns: list[str], limit: int,
-    ) -> np.ndarray:
+        columns: list[str], limit: "int | None",
+        cat_columns: "list[str] | None" = None,
+    ):
+        """
+        Fetch numeric columns as a float array.
+        If cat_columns is given, also fetches those string columns in the same
+        query and returns (X_num, cat_data) where cat_data is {col: [values]}.
+        Without cat_columns, returns X_num only (backwards-compatible).
+        """
         tbl_ref  = self.conn.table_ref(db, schema, table)
         qcols    = [self.conn.quote_col(c) for c in columns]
-        cols_sql = ", ".join(qcols)
         where    = " AND ".join(f"{qc} IS NOT NULL" for qc in qcols)
-        sql      = f"SELECT {cols_sql} FROM {tbl_ref} WHERE {where} LIMIT {limit}"
-        rows     = self.conn.fetch_all(sql)
+        limit_clause = f" LIMIT {limit}" if limit else ""
+
+        if cat_columns:
+            cat_qcols = [self.conn.quote_col(c) for c in cat_columns]
+            cols_sql  = ", ".join(qcols + cat_qcols)
+        else:
+            cols_sql  = ", ".join(qcols)
+
+        sql  = f"SELECT {cols_sql} FROM {tbl_ref} WHERE {where}{limit_clause}"
+        rows = self.conn.fetch_all(sql)
+
+        n_num = len(columns)
         if not rows:
-            return np.zeros((0, len(columns)), dtype=np.float64)
-        return np.array(
-            [[float(v) if v is not None else np.nan for v in row] for row in rows],
+            X_num = np.zeros((0, n_num), dtype=np.float64)
+            return (X_num, {}) if cat_columns else X_num
+
+        X_num = np.array(
+            [[float(row[j]) if row[j] is not None else np.nan for j in range(n_num)]
+             for row in rows],
             dtype=np.float64,
         )
+
+        if not cat_columns:
+            return X_num
+
+        cat_data = {
+            col: [row[n_num + i] for row in rows]
+            for i, col in enumerate(cat_columns)
+        }
+        return X_num, cat_data
+
+    def _encode_cat_features(
+        self, cat_feature_ids: list, cat_data: dict
+    ) -> "tuple[list, list]":
+        """Encode categorical feature IDs (_freq / _ord / _01) into float arrays."""
+        from collections import Counter
+        out_cols: list = []
+        out_names: list = []
+        for fid in cat_feature_ids:
+            for sfx, kind in [("_freq", "freq"), ("_ord", "ord"), ("_01", "bin")]:
+                if not fid.endswith(sfx):
+                    continue
+                base = fid[: -len(sfx)]
+                vals = cat_data.get(base)
+                if vals is None:
+                    break
+                n = len(vals)
+                if kind == "freq":
+                    counts = Counter(v for v in vals if v is not None)
+                    arr = np.array(
+                        [counts.get(v, 0) / n if v is not None else np.nan for v in vals],
+                        dtype=np.float64,
+                    )
+                elif kind == "ord":
+                    unique  = sorted(set(v for v in vals if v is not None))
+                    ord_map = {v: float(i) for i, v in enumerate(unique)}
+                    arr = np.array(
+                        [ord_map.get(v, np.nan) if v is not None else np.nan for v in vals],
+                        dtype=np.float64,
+                    )
+                else:  # bin
+                    unique = sorted(set(v for v in vals if v is not None))
+                    if len(unique) != 2:
+                        break
+                    arr = np.array(
+                        [0.0 if v == unique[0] else (1.0 if v == unique[1] else np.nan)
+                         for v in vals],
+                        dtype=np.float64,
+                    )
+                out_cols.append(arr)
+                out_names.append(fid)
+                break
+        return out_cols, out_names
 
     # ── Main ─────────────────────────────────────────────────────────────────
 
     def run(
         self,
-        db:             str,
-        schema:         str,
-        table:          str,
-        model_name:     str         = "kmeans",
-        params:         dict | None = None,
-        columns:        list[str] | None = None,
-        feature_ids:    list[str] | None = None,  # engineered feature selection
-        sample_size:    int         = 10_000,
+        db:               str,
+        schema:           str,
+        table:            str,
+        model_name:       str              = "kmeans",
+        params:           dict | None      = None,
+        columns:          list[str] | None = None,
+        feature_ids:      list[str] | None = None,
+        cat_feature_ids:  list[str] | None = None,  # "{col}_freq" / "_ord" / "_01"
+        sample_size:      int              = 10_000,
+        scaler_type:      str              = "standard",
     ) -> dict:
         """
         Full pipeline: fetch → engineer features → scale → cluster → metrics → PCA.
 
         Parameters
         ----------
-        columns      Base numeric columns to fetch (auto-selected if None).
-        feature_ids  Selected feature IDs after engineering (all originals if None).
+        columns          Base numeric columns to fetch (auto-selected if None).
+        feature_ids      Selected feature IDs after engineering (all originals if None).
+        cat_feature_ids  Encoded categorical feature IDs (_freq / _ord / _01 suffixes).
         """
         from sklearn.preprocessing import StandardScaler
         from sklearn.decomposition import PCA
@@ -397,8 +526,27 @@ class ClusteringEngine:
                 f"Need at least 2 numeric columns. Found {len(columns)}."
             )
 
+        # Derive categorical base columns from cat_feature_ids
+        cat_base_cols: list[str] = []
+        if cat_feature_ids:
+            _seen: set[str] = set()
+            for _fid in cat_feature_ids:
+                for _sfx in ("_freq", "_ord", "_01"):
+                    if _fid.endswith(_sfx):
+                        _base = _fid[: -len(_sfx)]
+                        if _base not in _seen:
+                            cat_base_cols.append(_base)
+                            _seen.add(_base)
+                        break
+
         # 2 ─ fetch raw sample
-        X_raw = self._fetch_sample(db, schema, table, columns, sample_size)
+        if cat_base_cols:
+            X_raw, _cat_data = self._fetch_sample(
+                db, schema, table, columns, sample_size, cat_columns=cat_base_cols
+            )
+        else:
+            X_raw     = self._fetch_sample(db, schema, table, columns, sample_size)
+            _cat_data: dict = {}
         if len(X_raw) < 10:
             raise ValueError(
                 f"Too few rows after null filtering ({len(X_raw)}). "
@@ -418,11 +566,27 @@ class ClusteringEngine:
         X_eng, feature_names = fe.apply(selected_ids)
         feat_meta = {s["id"]: s for s in suggestions}
 
+        # Append categorical encodings if requested
+        if cat_feature_ids and _cat_data:
+            _cat_arrs, _cat_names = self._encode_cat_features(cat_feature_ids, _cat_data)
+            if _cat_arrs:
+                X_eng         = np.column_stack([X_eng] + _cat_arrs)
+                feature_names = feature_names + _cat_names
+
         # 4 ─ impute + scale
         imputer = SimpleImputer(strategy="mean")
         X_imp   = imputer.fit_transform(X_eng)
-        scaler  = StandardScaler()
-        X_sc    = scaler.fit_transform(X_imp)
+
+        if scaler_type == "minmax":
+            from sklearn.preprocessing import MinMaxScaler
+            X_sc = MinMaxScaler().fit_transform(X_imp)
+        elif scaler_type == "robust":
+            from sklearn.preprocessing import RobustScaler
+            X_sc = RobustScaler().fit_transform(X_imp)
+        elif scaler_type == "none":
+            X_sc = X_imp.copy()
+        else:
+            X_sc = StandardScaler().fit_transform(X_imp)
 
         # 5 ─ fit model
         model  = _build_model(model_name, params)
@@ -499,8 +663,25 @@ class ClusteringEngine:
                 "centroid": centroid,
             })
 
+        # Compact stratified sample (pre-scale) for the Data tab
+        rows_per_cluster = max(5, 500 // max(1, n_clusters))
+        data_sample: list[dict] = []
+        cluster_seen: dict[int, int] = {}
+        for i, lbl in enumerate(labels):
+            if lbl < 0:
+                continue
+            cnt = cluster_seen.get(lbl, 0)
+            if cnt < rows_per_cluster:
+                row = {"cluster": int(lbl)}
+                for j, fn in enumerate(feature_names):
+                    row[fn] = round(float(X_imp[i, j]), 4)
+                data_sample.append(row)
+                cluster_seen[lbl] = cnt + 1
+
         return {
             "model":            model_name,
+            "scaler_type":      scaler_type,
+            "data_sample":      data_sample,
             "model_label":      MODELS.get(model_name, {}).get("label", model_name),
             "params":           params,
             "columns_used":     feature_names,

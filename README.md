@@ -1,13 +1,13 @@
-# Snowflake Profiler
+# DataLens
 
-A multi-platform **data profiling tool** with a built-in web UI for managing
-configuration, running statistical profiles, detecting column relationships,
-computing correlation matrices, and visualising results as interactive HTML
-reports.
+**DataLens** is a multi-platform data intelligence tool with a built-in web UI
+for profiling tables, detecting column relationships, computing correlation
+matrices, running ML clustering with AI insights, and managing data-quality
+alerts — all without moving data out of your warehouse.
 
 Supports **Snowflake**, **Databricks (Apache Spark SQL)**, and **SQLite**
-through a shared platform-abstraction layer — all computations execute
-server-side, no data ever leaves the warehouse.
+through a shared platform-abstraction layer. All computations execute
+server-side.
 
 ---
 
@@ -105,7 +105,7 @@ Browser → POST /api/profile
 
 ```powershell
 # 1 — Clone / enter the project
-cd c:\path\to\snowflake_profiler
+cd c:\path\to\datalens
 
 # 2 — Create virtual environment and install dependencies
 python -m venv .venv
@@ -440,7 +440,7 @@ and all 65 columns. These appear inline on every column card in the report.
 ## Project Structure
 
 ```
-snowflake_profiler/
+datalens/
 │
 ├── app.py                    Flask web application — all HTTP routes
 ├── config.py                 Configuration dataclasses + load_config()

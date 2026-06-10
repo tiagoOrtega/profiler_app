@@ -1,0 +1,12 @@
+# Streamlit in Snowflake — package dependencies
+# streamlit and snowflake-snowpark-python are always available and must NOT be listed here.
+name: datalens
+channels:
+  - snowflake
+dependencies:
+  - pandas
+  - numpy
+  - scikit-learn
+  - plotly
+  - scipy
+  - requests

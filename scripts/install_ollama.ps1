@@ -9,8 +9,8 @@ param(
 )
 
 Write-Host ""
-Write-Host "  Snowflake Profiler - Ollama LLM Setup" -ForegroundColor Cyan
-Write-Host "  ======================================" -ForegroundColor Cyan
+Write-Host "  DataLens - Ollama LLM Setup" -ForegroundColor Cyan
+Write-Host "  ===========================" -ForegroundColor Cyan
 Write-Host ""
 
 # --- 1. Check / install Ollama ---
@@ -67,7 +67,7 @@ Write-Host "  Setup complete!" -ForegroundColor Green
 Write-Host "  Ollama API : http://localhost:11434" -ForegroundColor Cyan
 Write-Host "  Model      : $Model" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  In the Profiler web UI:" -ForegroundColor Yellow
+Write-Host "  In DataLens web UI:" -ForegroundColor Yellow
 Write-Host "    Sources page -> AI Insights section -> select Ollama" -ForegroundColor Yellow
 Write-Host "    Set Model name to: $Model" -ForegroundColor Yellow
 Write-Host ""

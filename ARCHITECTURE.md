@@ -1,4 +1,4 @@
-# Architecture
+# DataLens — Architecture
 
 Technical design reference for contributors and platform integrators.
 

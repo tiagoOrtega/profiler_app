@@ -1,0 +1,34 @@
+{
+  "explanation": "Here's an explanation of the Pearson correlation matrix for a business audience:\n\n\u2022 **Strong positive correlations indicate strong relationships between variables**: The strongest positive correlations, such as NET_AMOUNT and TAX_AMOUNT (r=+1.000), GROSS_AMOUNT and NET_AMOUNT (r=+0.980), and GROSS_AMOUNT and MARGIN_AMOUNT (r=+0.951), suggest that these variables are closely related. For example, an increase in tax amount is likely to lead to a corresponding increase in net amount, as the tax amount is subtracted from the gross amount to get the net amount.\n\n\u2022 **Strong negative correlations reveal potential areas for improvement**: Although there are no strong negative correlations in this dataset, the weak negative correlation between EMPLOYEE_KEY and QUANTITY (r=-0.028) suggests that employee quantity may not be directly related to sales quantity. This could indicate an opportunity to optimize staffing levels or adjust production processes to better match demand.\n\n\u2022 **Near-zero correlations reveal independent variables**: The near-zero correlations, such as DATE_KEY and PROMOTION_KEY (r=+0.040), suggest that these variables are relatively independent of each other. This is not surprising, as date keys typically represent specific dates, while promotion keys may represent different marketing campaigns or promotions.\n\n\u2022 **Expected correlations in retail industry**: The strong positive correlations between GROSS_AMOUNT and MARGIN_AMOUNT (r=+0.970) and between UNIT_PRICE and GROSS_AMOUNT (r=+0.833) are expected in the retail industry, as higher prices typically lead to higher gross amounts and margins.\n\n\u2022 **Actionable recommendation: Optimize pricing strategy**: Based on the strong positive correlation between UNIT_PRICE and GROSS_AMOUNT (r=+0.833), it may be beneficial for the business to focus on optimizing its pricing strategy. By adjusting unit prices to maximize gross amounts, the business can potentially increase revenue and profitability.",
+  "rule_based": false,
+  "provider": "ollama",
+  "model": "llama3.2",
+  "generated_at": "2026-06-10T09:27:57.226767",
+  "top_pairs": [
+    [
+      1.0,
+      "NET_AMOUNT",
+      "TAX_AMOUNT"
+    ],
+    [
+      0.989,
+      "UNIT_PRICE",
+      "UNIT_COST"
+    ],
+    [
+      0.9799,
+      "GROSS_AMOUNT",
+      "TAX_AMOUNT"
+    ],
+    [
+      0.9799,
+      "GROSS_AMOUNT",
+      "NET_AMOUNT"
+    ],
+    [
+      0.9704,
+      "TAX_AMOUNT",
+      "MARGIN_AMOUNT"
+    ]
+  ]
+}
