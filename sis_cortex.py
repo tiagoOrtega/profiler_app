@@ -334,6 +334,44 @@ def explain_clusters(
     return result or "No AI insights available. Check AI provider configuration."
 
 
+def explain_trends(
+    session,
+    date_col: str,
+    period: str,
+    metrics: dict,
+    model: Optional[str] = None,
+) -> str:
+    """Return AI interpretation of time-series trend results."""
+    lines = []
+    for col, m in metrics.items():
+        if not isinstance(m, dict) or "trend" not in m:
+            continue
+        t   = m["trend"]
+        mom = m.get("mom_change_pct")
+        spk = len(m.get("spikes", []))
+        mom_str = f", last {period}-over-{period}: {mom:+.1f}%" if mom is not None else ""
+        spk_str = f", {spk} spike(s)" if spk else ""
+        lines.append(
+            f"  {col}: {t['direction']} trend "
+            f"({t['slope_pct']:+.1f}%/{period}, R²={t['r2']:.2f})"
+            f"{mom_str}{spk_str}"
+        )
+
+    summary = "\n".join(lines[:10]) or "No trend data available."
+    prompt = (
+        f"You are a data analyst reviewing time-series trends in a business dataset.\n\n"
+        f"Date column: {date_col}  |  Period: {period}\n"
+        f"Metric trends:\n{summary}\n\n"
+        f"Write 3-5 bullet points interpreting these trends in business terms:\n"
+        f"• Which metrics are growing / declining and what might drive this?\n"
+        f"• Are there any concerning patterns or spikes worth investigating?\n"
+        f"• What actions or further analyses would you recommend?\n"
+        f"Be specific and concise."
+    )
+    result = complete(session, prompt, model)
+    return result or "No AI insights available. Check AI provider configuration."
+
+
 def explain_visual_insights(
     session,
     cluster_stats: list,

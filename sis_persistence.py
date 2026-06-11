@@ -88,6 +88,12 @@ def initialize(session) -> None:
             UPDATED_AT    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
             CONSTRAINT PK_APP_SETTINGS PRIMARY KEY (SETTING_KEY)
         )""",
+        f"""CREATE TABLE IF NOT EXISTS {db}.{sc}.TREND_RESULTS (
+            PROFILE_KEY VARCHAR(500) NOT NULL,
+            RESULT_JSON VARCHAR,
+            CREATED_AT  TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+            CONSTRAINT PK_TREND PRIMARY KEY (PROFILE_KEY)
+        )""",
     ]
     for ddl in ddls:
         session.sql(ddl).collect()
@@ -135,7 +141,7 @@ def list_profiles(session) -> list:
 def delete_profile(session, database: str, schema: str, table: str) -> None:
     key = profile_key(database, schema, table)
     for tname in ("PROFILE_RESULTS", "RELATIONSHIP_RESULTS",
-                  "CORRELATION_RESULTS", "CLUSTERING_RESULTS"):
+                  "CORRELATION_RESULTS", "CLUSTERING_RESULTS", "TREND_RESULTS"):
         session.sql(
             f"DELETE FROM {_tbl(session, tname)} WHERE PROFILE_KEY = '{key}'"
         ).collect()
