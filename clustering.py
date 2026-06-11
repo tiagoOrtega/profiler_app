@@ -699,3 +699,201 @@ class ClusteringEngine:
             },
             "pca_explained_variance": exp_var,
         }
+
+    # ── Anomaly Detection ─────────────────────────────────────────────────────
+
+    def run_anomaly_detection(
+        self,
+        db:            str,
+        schema:        str,
+        table:         str,
+        columns:       list[str] | None = None,
+        method:        str              = "isolation_forest",
+        contamination: float            = 0.05,
+        sample_size:   int              = 10_000,
+        scaler_type:   str              = "standard",
+    ) -> dict:
+        """
+        Detect anomalous rows using Isolation Forest or Local Outlier Factor.
+
+        Returns scatter coords (PCA 2-D), per-row anomaly scores, and a
+        top-50 anomaly table with original feature values.
+        """
+        from sklearn.impute import SimpleImputer
+        from sklearn.decomposition import PCA
+
+        if not columns:
+            columns = self.auto_select_columns(db, schema, table)
+        if len(columns) < 1:
+            raise ValueError("Need at least 1 numeric column for anomaly detection.")
+
+        X_raw = self._fetch_sample(db, schema, table, columns, sample_size)
+        if len(X_raw) < 10:
+            raise ValueError(f"Too few rows ({len(X_raw)}) after null filtering.")
+
+        X_imp = SimpleImputer(strategy="mean").fit_transform(X_raw)
+
+        if scaler_type == "minmax":
+            from sklearn.preprocessing import MinMaxScaler
+            X_sc = MinMaxScaler().fit_transform(X_imp)
+        elif scaler_type == "robust":
+            from sklearn.preprocessing import RobustScaler
+            X_sc = RobustScaler().fit_transform(X_imp)
+        elif scaler_type == "none":
+            X_sc = X_imp.copy()
+        else:
+            from sklearn.preprocessing import StandardScaler
+            X_sc = StandardScaler().fit_transform(X_imp)
+
+        if method == "lof":
+            from sklearn.neighbors import LocalOutlierFactor
+            clf    = LocalOutlierFactor(contamination=contamination)
+            labels = clf.fit_predict(X_sc)
+            scores = -clf.negative_outlier_factor_
+        else:
+            from sklearn.ensemble import IsolationForest
+            clf    = IsolationForest(contamination=contamination, random_state=42)
+            labels = clf.fit_predict(X_sc)
+            scores = -clf.score_samples(X_sc)
+
+        n_anomalies = int(np.sum(labels == -1))
+        n_total     = len(labels)
+
+        n_comp = min(2, X_sc.shape[1])
+        pca    = PCA(n_components=n_comp, random_state=42)
+        X_2d   = pca.fit_transform(X_sc)
+        exp_var = pca.explained_variance_ratio_.tolist()
+
+        MAX_PTS    = 5_000
+        normal_pts: list  = []
+        anomaly_pts: list = []
+        for i, lbl in enumerate(labels):
+            pt = {
+                "x":     round(float(X_2d[i, 0]), 4),
+                "y":     round(float(X_2d[i, 1]) if n_comp > 1 else 0.0, 4),
+                "score": round(float(scores[i]), 4),
+            }
+            if lbl == -1 and len(anomaly_pts) < MAX_PTS // 2:
+                anomaly_pts.append(pt)
+            elif lbl == 1 and len(normal_pts) < MAX_PTS:
+                normal_pts.append(pt)
+
+        top_idx   = sorted(range(n_total), key=lambda i: scores[i], reverse=True)
+        top_idx   = [i for i in top_idx if labels[i] == -1][:50]
+        top_rows  = []
+        for i in top_idx:
+            row = {"anomaly_score": round(float(scores[i]), 4)}
+            for j, col in enumerate(columns):
+                row[col] = round(float(X_imp[i, j]), 4)
+            top_rows.append(row)
+
+        return {
+            "method":        method,
+            "contamination": contamination,
+            "columns_used":  columns,
+            "sample_size":   n_total,
+            "n_anomalies":   n_anomalies,
+            "anomaly_pct":   round(n_anomalies / n_total * 100, 2),
+            "scatter": {
+                "normal":    normal_pts,
+                "anomalies": anomaly_pts,
+                "x_label":   f"PC1 ({exp_var[0]*100:.1f}% var)" if exp_var else "PC1",
+                "y_label":   f"PC2 ({exp_var[1]*100:.1f}% var)" if len(exp_var) > 1 else "PC2",
+            },
+            "top_anomalies": top_rows,
+        }
+
+    # ── Dimensionality Reduction ──────────────────────────────────────────────
+
+    def run_dim_reduction(
+        self,
+        db:             str,
+        schema:         str,
+        table:          str,
+        columns:        list[str] | None  = None,
+        method:         str               = "pca",
+        sample_size:    int               = 5_000,
+        scaler_type:    str               = "standard",
+        cluster_labels: list[int] | None  = None,
+    ) -> dict:
+        """
+        Project data into 2-D using PCA, t-SNE, or UMAP.
+
+        cluster_labels — optional list of cluster assignments (same length as
+        the fetched sample) used to colour the scatter by cluster.
+        """
+        from sklearn.impute import SimpleImputer
+
+        if not columns:
+            columns = self.auto_select_columns(db, schema, table)
+        if len(columns) < 2:
+            raise ValueError("Need at least 2 numeric columns for dimensionality reduction.")
+
+        # t-SNE is slow — cap hard at 2 000 rows
+        cap = min(sample_size, 2_000) if method == "tsne" else sample_size
+        X_raw = self._fetch_sample(db, schema, table, columns, cap)
+        if len(X_raw) < 5:
+            raise ValueError(f"Too few rows ({len(X_raw)}) after null filtering.")
+
+        X_imp = SimpleImputer(strategy="mean").fit_transform(X_raw)
+
+        if scaler_type == "minmax":
+            from sklearn.preprocessing import MinMaxScaler
+            X_sc = MinMaxScaler().fit_transform(X_imp)
+        elif scaler_type == "robust":
+            from sklearn.preprocessing import RobustScaler
+            X_sc = RobustScaler().fit_transform(X_imp)
+        elif scaler_type == "none":
+            X_sc = X_imp.copy()
+        else:
+            from sklearn.preprocessing import StandardScaler
+            X_sc = StandardScaler().fit_transform(X_imp)
+
+        extra: dict = {}
+        if method == "tsne":
+            from sklearn.manifold import TSNE
+            if X_sc.shape[1] > 50:
+                from sklearn.decomposition import PCA as _PCA
+                X_sc = _PCA(n_components=50, random_state=42).fit_transform(X_sc)
+            perp  = min(30, max(5, len(X_sc) // 4))
+            X_2d  = TSNE(n_components=2, random_state=42, perplexity=perp).fit_transform(X_sc)
+            x_lbl, y_lbl = "t-SNE 1", "t-SNE 2"
+
+        elif method == "umap":
+            try:
+                from umap import UMAP
+            except ImportError:
+                raise ImportError("umap-learn not installed — run: pip install umap-learn")
+            X_2d  = UMAP(n_components=2, random_state=42).fit_transform(X_sc)
+            x_lbl, y_lbl = "UMAP 1", "UMAP 2"
+
+        else:  # pca
+            from sklearn.decomposition import PCA
+            n_comp = min(2, X_sc.shape[1])
+            pca    = PCA(n_components=n_comp, random_state=42)
+            X_2d   = pca.fit_transform(X_sc)
+            ev     = pca.explained_variance_ratio_.tolist()
+            extra["explained_variance"] = ev
+            x_lbl  = f"PC1 ({ev[0]*100:.1f}% var)" if ev else "PC1"
+            y_lbl  = f"PC2 ({ev[1]*100:.1f}% var)" if len(ev) > 1 else "PC2"
+
+        MAX_PTS = 5_000
+        points: list = []
+        for i in range(min(len(X_2d), MAX_PTS)):
+            pt: dict = {
+                "x": round(float(X_2d[i, 0]), 4),
+                "y": round(float(X_2d[i, 1]) if X_2d.shape[1] > 1 else 0.0, 4),
+            }
+            if cluster_labels and i < len(cluster_labels):
+                pt["cluster"] = int(cluster_labels[i])
+            points.append(pt)
+
+        return {
+            "method":       method,
+            "columns_used": columns,
+            "sample_size":  len(X_raw),
+            "points":       points,
+            "x_label":      x_lbl,
+            "y_label":      y_lbl,
+            **extra,
+        }

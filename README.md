@@ -38,13 +38,18 @@ server-side.
 | Feature | Description |
 |---|---|
 | **Statistical Profiling** | Row count, null rate, distinct count, uniqueness, min/max, mean, median, stddev, variance, skewness, kurtosis, quartiles for every column |
-| **Multi-platform** | Snowflake, Databricks, SQLite — same UI and reports for all three |
+| **Multi-platform** | Snowflake, Databricks, SQLite, Snowflake Snowpark — same UI and reports for all |
 | **Relationship Detection** | Auto-detects FK-like references across profiled tables using EXCEPT queries; supports manual annotations |
 | **Correlation Matrix** | Pearson coefficients for all numeric column pairs, rendered as a colour-coded heatmap |
+| **ML Clustering** | K-Means, Bisecting K-Means, DBSCAN, OPTICS, GMM, Agglomerative — with optimal-k suggestion (silhouette + elbow), preprocessing, feature engineering studio, and AI insights |
+| **Anomaly Detection** | Isolation Forest and Local Outlier Factor; PCA 2-D scatter with anomaly overlay; top-50 anomaly table with original feature values |
+| **Dimensionality Reduction** | Project high-dimensional data into 2-D via PCA, t-SNE, or UMAP; colour by cluster assignment |
+| **Feature Engineering Studio** | Auto-suggests log transforms, quartile bins, outlier flags, ratios, and categorical encodings; AI-assisted recommendations via Snowflake Cortex |
 | **Drift Alerting** | Threshold-based alerts for null rate, row count change, std dev drift and variance drift; optional Slack notifications |
 | **History Tracking** | Persists profile snapshots to JSON; compares current run against previous run for drift detection |
 | **Snowflake Comments** | Fetches table/column COMMENT metadata and displays it inline on every column card |
-| **Interactive Reports** | Tabbed HTML report with Overview charts (Chart.js), Column Details, Relationships tab, Correlation tab |
+| **Interactive Reports** | Tabbed Streamlit report (Profile, Report, Relationships, Clustering, Configuration, Help) and Flask HTML report with Chart.js |
+| **Streamlit in Snowflake** | Native SiS deployment via `streamlit_app.py`; persistence through Snowflake tables instead of local JSON; Snowflake Cortex AI |
 | **Sample Data** | Ready-to-run setup scripts for all three platforms (retail star schema: 7 tables, ~11 600 rows) |
 | **Test Suite** | 247 unit tests with pytest covering all modules |
 
@@ -54,28 +59,26 @@ server-side.
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│                      Web UI (Flask)                        │
-│  /config  /profile  /report  /api/*                        │
-└───────────────────────┬────────────────────────────────────┘
-                        │
-          ┌─────────────▼─────────────┐
-          │   _get_platform(cfg)      │  ← factory function
-          └──┬────────┬──────────┬───┘
-             │        │          │
-    ┌────────▼─┐  ┌───▼────┐  ┌─▼──────────┐
-    │Snowflake │  │SQLite  │  │Databricks  │
-    │Platform  │  │Platform│  │Platform    │
-    └────────┬─┘  └───┬────┘  └─┬──────────┘
-             │        │          │
-          ┌──▼────────▼──────────▼──┐
-          │   BasePlatform          │  ← abstract interface
-          │  fetch_one / fetch_all  │
-          │  get_tables / columns   │
-          │  SQL builders per type  │
-          └──────────┬──────────────┘
+│            Web UI (Flask)       Web UI (Streamlit)         │
+│  /config  /profile  /report     pages/1..6  streamlit_app  │
+└───────────────────┬─────────────────────┬──────────────────┘
+                    │                     │
+          ┌─────────▼──────────┐   ┌──────▼──────────────┐
+          │  _get_platform()   │   │  SnowparkPlatform    │
+          │  (Flask factory)   │   │  (SiS / Snowpark)   │
+          └──┬──────┬──────┬───┘   └──────────────────────┘
+             │      │      │
+    ┌────────▼─┐ ┌──▼──┐ ┌─▼──────────┐
+    │Snowflake │ │SQLite│ │Databricks  │
+    └────────┬─┘ └──┬──┘ └─┬──────────┘
+             │      │      │
+          ┌──▼──────▼──────▼──┐
+          │   BasePlatform    │  ← abstract interface
+          └──────────┬────────┘
                      │
           ┌──────────▼──────────────┐
           │   DataProfiler          │  ← platform-agnostic
+          │   ClusteringEngine      │
           │   RelationshipDetector  │
           │   HistoryManager        │
           │   AlertManager          │
@@ -148,17 +151,27 @@ pip install -r requirements.txt
 ```
 snowflake-connector-python>=3.5.0   # Snowflake platform
 databricks-sql-connector>=3.0.0     # Databricks platform
-flask>=3.0.0                        # web UI
+flask>=3.0.0                        # Flask web UI
+streamlit>=1.28.0                   # Streamlit web UI (primary)
+plotly>=5.0.0                       # interactive charts in Streamlit pages
 pandas>=2.0.0                       # data manipulation
-jinja2>=3.1.0                       # HTML templates
-requests>=2.31.0                    # Slack webhook
+requests>=2.31.0                    # Slack webhook + LLM HTTP calls
 python-dotenv>=1.0.0                # .env file support
 pyyaml>=6.0                         # config file parsing
+scikit-learn>=1.3.0                 # clustering, anomaly detection, dim reduction
+numpy>=1.26.0                       # numerical arrays
+scipy>=1.11.0                       # skewness computation in clustering
+openai>=1.0.0                       # OpenAI LLM provider
+anthropic>=0.18.0                   # Anthropic LLM provider
 pytest>=8.0.0                       # test runner
 pytest-cov>=5.0.0                   # coverage reporting
 ```
 
 SQLite support uses Python's built-in `sqlite3` module — no extra package needed.
+
+For Streamlit in Snowflake (SiS), `streamlit` and `snowflake-snowpark-python` are
+pre-installed in the runtime environment. Local SiS development requires the conda
+environment defined in `environment.yml`.
 
 ---
 
@@ -276,13 +289,40 @@ SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
 
 ## Web UI
 
-Start the server:
+DataLens has two web UIs: **Streamlit** (primary, recommended) and **Flask** (API + legacy).
+
+### Streamlit (primary)
+
+```powershell
+streamlit run streamlit_app.py    # http://localhost:8501
+```
+
+| Page | Purpose |
+|---|---|
+| **DataLens (home)** | Dashboard — metrics summary, profiled tables table, click-to-select |
+| **Profile** | Run a profile — pick Database / Schema / Table, click Run Profile |
+| **Report** | Full tabbed report: Overview, Columns, Relationships, Correlation |
+| **Relationships** | Detect FK-like references, run/re-run, delete, add manual annotations |
+| **Clustering** | Full ML clustering page — 6 result tabs (see below) |
+| **Configuration** | Platform settings, Cortex model preference |
+| **Help** | Built-in usage guide |
+
+#### Clustering Page Tabs
+
+| Tab | Content |
+|---|---|
+| **Results** | PCA scatter coloured by cluster, cluster size bar chart, centroid table, AI insights |
+| **Optimal k** | Silhouette + inertia chart for k=2..12, recommend and apply best k |
+| **Sample Data** | Stratified sample of rows sent to the model, filterable by cluster |
+| **Visual Insights** | Feature distribution box plots by cluster, divergence ranking, AI explanation |
+| **Anomaly Detection** | Isolation Forest / LOF; PCA 2-D scatter with anomaly overlay; top-50 anomaly table |
+| **Dim. Reduction** | PCA / t-SNE / UMAP 2-D projection, coloured by cluster if clustering was run |
+
+### Flask (API + legacy)
 
 ```powershell
 python app.py          # http://localhost:5000
 ```
-
-### Pages
 
 | URL | Purpose |
 |---|---|
@@ -291,7 +331,7 @@ python app.py          # http://localhost:5000
 | `/profile` | Run a profile — cascading dropdown (database → schema → table), live progress bar |
 | `/report?db=X&schema=Y&table=Z` | Full report with 4 tabs |
 
-### Report Tabs
+#### Flask Report Tabs
 
 | Tab | Content |
 |---|---|
@@ -442,6 +482,7 @@ and all 65 columns. These appear inline on every column card in the report.
 ```
 datalens/
 │
+├── streamlit_app.py          Streamlit in Snowflake entry point — navigation + home dashboard
 ├── app.py                    Flask web application — all HTTP routes
 ├── config.py                 Configuration dataclasses + load_config()
 ├── connection.py             Low-level Snowflake connector wrapper
@@ -449,14 +490,32 @@ datalens/
 ├── history.py                HistoryManager — JSON persistence for drift detection
 ├── alerts.py                 AlertManager — threshold evaluation + Slack
 ├── relationships.py          RelationshipDetector — FK inference via EXCEPT queries
+├── clustering.py             ClusteringEngine — ML clustering, anomaly detection, dim reduction
+├── feature_selector.py       Feature importance ranking (mutual info + correlation)
+├── llm_providers.py          Multi-provider LLM wrapper (Ollama, OpenAI, Anthropic)
+├── llm_insights.py           AI-powered clustering insights
+├── comment_generator.py      Auto-generates column descriptions via LLM
+│
+├── sis_session.py            Snowpark session factory (Streamlit in Snowflake)
+├── sis_persistence.py        Snowflake-native persistence layer (replaces local JSON in SiS)
+├── sis_cortex.py             Snowflake Cortex AI (cluster insights, feature engineering)
 │
 ├── platforms/
 │   ├── base.py               BasePlatform — abstract interface all connectors implement
 │   ├── snowflake_platform.py Snowflake connector (wraps connection.py)
 │   ├── sqlite_platform.py    SQLite connector (stdlib sqlite3, no extra deps)
-│   └── databricks_platform.py Databricks connector (databricks-sql-connector)
+│   ├── databricks_platform.py Databricks connector (databricks-sql-connector)
+│   └── snowpark_platform.py  Snowpark / Streamlit in Snowflake adapter
 │
-├── templates/
+├── pages/                    Streamlit multi-page app
+│   ├── 1_Profile.py          Profile runner — pick table, run profile
+│   ├── 2_Report.py           Full report — Overview, Columns, Relationships, Correlation
+│   ├── 3_Relationships.py    FK detection, manual annotations
+│   ├── 4_Clustering.py       ML clustering — 6 result tabs
+│   ├── 5_Configuration.py    Platform settings, Cortex model preference
+│   └── 6_Help.py             Built-in usage guide
+│
+├── templates/                Flask HTML templates
 │   ├── base.html             Dark-theme layout — topbar, collapsible sidebar, apiFetch helper
 │   ├── index.html            Dashboard — table of profiled tables
 │   ├── config.html           Configuration editor — platform selector + forms
@@ -477,15 +536,21 @@ datalens/
 │   ├── test_platform_databricks.py platforms/databricks_platform.py — mocked
 │   └── test_setup_sqlite.py  setup_sqlite.py — row counts, FK integrity
 │
-├── setup_snowflake.sql       Snowflake DDL + data generation (GENERATOR, UNIFORM, NORMAL)
-├── setup_snowflake_comments.sql  COMMENT ON TABLE/COLUMN for all 7 tables
-├── setup_sqlite.py           Python script — generates SQLite sample database
-├── setup_databricks.sql      Databricks/Spark SQL DDL + data generation
-├── profile_table.py          CLI tool — profile a single table, print or output JSON
+├── setup_snowflake.sql          Snowflake DDL + data generation (GENERATOR, UNIFORM, NORMAL)
+├── setup_snowflake_comments.sql COMMENT ON TABLE/COLUMN for all 7 tables
+├── setup_datalens_metadata.sql  Creates DATALENS.METADATA schema for SiS persistence
+├── setup_organic_sales.sql      Additional sample schema: Organic Sales Star Schema
+├── setup_sqlite.py              Python script — generates SQLite sample database
+├── setup_databricks.sql         Databricks/Spark SQL DDL + data generation
+│
+├── scripts/
+│   ├── install_ollama.ps1    Ollama LLM installation (local dev)
+│   └── start_llm.ps1         Ollama startup script (local dev)
 │
 ├── config.yaml.example       Template — copy to config.yaml and edit
+├── environment.yml           Conda environment for Streamlit in Snowflake
 ├── .env.example              Template — copy to .env for env-var-based secrets
-├── requirements.txt          All Python dependencies
+├── requirements.txt          All Python dependencies (local dev)
 └── pytest.ini                pytest configuration
 ```
 

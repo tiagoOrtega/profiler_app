@@ -32,7 +32,7 @@ Technical design reference for contributors and platform integrators.
 ## Module Dependency Graph
 
 ```
-app.py
+app.py  (Flask)
  ├── config.py            (load_config, all config dataclasses)
  ├── platforms/           (via _get_platform factory)
  │    ├── base.py
@@ -42,12 +42,28 @@ app.py
  ├── profiling.py         (DataProfiler)
  ├── history.py           (HistoryManager)
  ├── alerts.py            (AlertManager)
- └── relationships.py     (RelationshipDetector)
+ ├── relationships.py     (RelationshipDetector)
+ ├── clustering.py        (ClusteringEngine)
+ ├── feature_selector.py  (FeatureSelector)
+ ├── llm_providers.py     (LLMProvider)
+ ├── llm_insights.py      (ClusteringInsights)
+ └── comment_generator.py (CommentGenerator)
+
+streamlit_app.py  (Streamlit in Snowflake entry point)
+ ├── sis_session.py       (Snowpark session factory)
+ ├── sis_persistence.py   (Snowflake-native JSON persistence)
+ └── pages/               (Streamlit multi-page app)
+      ├── 1_Profile.py    → sis_session, sis_persistence, platforms/snowpark_platform
+      ├── 2_Report.py     → sis_session, sis_persistence, sis_cortex, snowpark_platform
+      ├── 3_Relationships.py → ... + relationships
+      ├── 4_Clustering.py    → ... + clustering
+      ├── 5_Configuration.py → sis_session, sis_persistence, sis_cortex
+      └── 6_Help.py
 ```
 
-`app.py` is the only module that imports from all others. The domain modules
-(`profiling`, `history`, `alerts`, `relationships`) are independent of each
-other and can be used standalone.
+`app.py` and `streamlit_app.py` are the two orchestration modules. The domain
+modules (`profiling`, `history`, `alerts`, `relationships`, `clustering`) are
+independent of each other and can be used standalone.
 
 ---
 
@@ -152,6 +168,57 @@ for col_name, data_type, col_comment in columns:
 A per-column try/except ensures one bad column (e.g. `100051: Division by zero`
 on a constant column) is captured in `ColumnProfile.error` without aborting the
 whole table profile.
+
+---
+
+## Clustering Engine
+
+### `ClusteringEngine` (clustering.py)
+
+The engine exposes three independent operations — clustering, anomaly detection,
+and dimensionality reduction — all sharing the same `_fetch_sample` and scaler
+pipeline.
+
+#### `run(db, schema, table, model_name, params, …)`
+
+Standard ML clustering:
+
+```
+_fetch_sample → SimpleImputer → scaler → model.fit_predict
+             → PCA 2-D scatter → cluster stats (centroids, sizes, %)
+             → silhouette + Davies-Bouldin metrics
+             → data_sample (stratified, up to 500 rows)
+```
+
+Supported models: `kmeans`, `bisecting_kmeans`, `dbscan`, `optics`, `gmm`,
+`agglomerative`.
+
+**Feature Engineering Studio** (`suggest_features`): auto-computes available
+transforms (log1p, quartile bin, outlier flag, ratio) and categorical encodings
+(freq, ordinal, binary) from a sample. The UI lets the user toggle each transform
+before running the model.
+
+#### `run_anomaly_detection(db, schema, table, method, contamination, …)`
+
+```
+_fetch_sample → SimpleImputer → scaler → IsolationForest | LOF
+             → PCA 2-D scatter (normal vs anomaly points, up to 5 000)
+             → top-50 anomaly rows with original feature values
+```
+
+Returns `n_anomalies`, `anomaly_pct`, `scatter` (split normal/anomaly), and
+`top_anomalies`.
+
+#### `run_dim_reduction(db, schema, table, method, …)`
+
+```
+_fetch_sample → SimpleImputer → scaler → PCA | t-SNE | UMAP
+             → list of {x, y, [cluster]} points (up to 5 000)
+```
+
+- **t-SNE**: capped at 2 000 rows; pre-reduces to 50 PCA components if needed.
+- **UMAP**: requires `pip install umap-learn` (optional dependency).
+- Points carry a `cluster` key when `cluster_labels` are passed in.
 
 ---
 
@@ -306,6 +373,34 @@ base.html  (layout shell)
 
 The sidebar collapses on desktop (state persisted in `localStorage`) and slides
 over content on mobile (< 768 px) with a semi-transparent overlay.
+
+---
+
+## Streamlit in Snowflake (SiS)
+
+When deployed inside Snowflake (via `streamlit_app.py`), the app swaps the
+file-system persistence layer for Snowflake-native tables:
+
+| Local dev | SiS equivalent |
+|---|---|
+| `reports/<KEY>.json` (disk) | `DATALENS.METADATA.PROFILES` (Snowflake table) |
+| `reports/clustering/<KEY>.json` | `DATALENS.METADATA.RESULTS` |
+| `profiling_history.json` | `DATALENS.METADATA.HISTORY` |
+| `reports/relationships/<KEY>.json` | `DATALENS.METADATA.RESULTS` |
+
+Three SiS-specific modules handle the difference:
+
+| Module | Role |
+|---|---|
+| `sis_session.py` | Returns a `snowflake.snowpark.Session` (from SiS context or env vars) |
+| `sis_persistence.py` | `save_result / load_result / merge_result / list_profiles` — JSON in Snowflake tables |
+| `sis_cortex.py` | Calls Snowflake Cortex REST (`snowflake.cortex.Complete`) for AI features |
+
+The `platforms/snowpark_platform.py` adapter wraps a `Session` object and
+implements `BasePlatform`, so all domain modules work unchanged in SiS.
+
+Run `setup_datalens_metadata.sql` once in a Snowflake worksheet to create the
+`DATALENS.METADATA` schema before first use.
 
 ---
 

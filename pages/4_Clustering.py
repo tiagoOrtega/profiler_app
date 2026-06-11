@@ -28,7 +28,7 @@ except RuntimeError as _e:
 import sis_persistence as persistence
 import sis_cortex as cortex
 from platforms.snowpark_platform import SnowparkPlatform
-from clustering import ClusteringEngine, MODELS as CLUSTERING_MODELS
+from clustering import ClusteringEngine, MODELS as CLUSTERING_MODELS, _PALETTE, _NOISE_COLOR
 
 platform = SnowparkPlatform(session)
 
@@ -630,8 +630,9 @@ if run_clicked:
 # ══════════════════════════ RESULTS TABS ═════════════════════════════════════
 
 st.divider()
-tab_results, tab_ksug, tab_data, tab_viz = st.tabs(
-    ["Results", "Optimal k", "Sample Data", "Visual Insights"]
+tab_results, tab_ksug, tab_data, tab_viz, tab_anomaly, tab_dimred = st.tabs(
+    ["Results", "Optimal k", "Sample Data", "Visual Insights",
+     "Anomaly Detection", "Dim. Reduction"]
 )
 
 # ── Results tab ───────────────────────────────────────────────────────────────
@@ -896,3 +897,239 @@ with tab_viz:
                         st.error(f"AI explanation failed: {_exc}")
             if st.session_state.get(_viz_ins_key):
                 st.markdown(st.session_state[_viz_ins_key])
+
+# ── Anomaly Detection tab ─────────────────────────────────────────────────────
+
+with tab_anomaly:
+    st.caption(
+        "Detects statistically unusual rows using Isolation Forest or Local Outlier Factor. "
+        "Anomalies are highlighted on a PCA 2-D scatter."
+    )
+
+    _an_method_key = f"an_method_{db}__{schema}__{table}"
+    _an_data_key   = f"an_data_{db}__{schema}__{table}"
+
+    _an_c1, _an_c2, _an_c3, _an_c4 = st.columns([2, 2, 2, 1], gap="medium")
+    with _an_c1:
+        _an_method = st.selectbox(
+            "Method",
+            ["isolation_forest", "lof"],
+            format_func=lambda m: "Isolation Forest" if m == "isolation_forest" else "Local Outlier Factor",
+            key="an_method",
+        )
+    with _an_c2:
+        _an_contamination = st.slider(
+            "Expected anomaly rate", 0.01, 0.30, 0.05, 0.01, key="an_contam",
+            help="Fraction of rows expected to be anomalous.",
+        )
+    with _an_c3:
+        _an_features = st.multiselect(
+            "Columns", numeric_cols,
+            default=numeric_cols[:min(10, len(numeric_cols))],
+            key="an_features",
+            label_visibility="visible",
+        )
+    with _an_c4:
+        st.markdown("&nbsp;", unsafe_allow_html=True)
+        _an_run = st.button("Run", type="primary", key="an_run",
+                            disabled=len(_an_features) < 1,
+                            use_container_width=True)
+
+    if _an_run and _an_features:
+        with st.spinner("Detecting anomalies …"):
+            try:
+                with tempfile.TemporaryDirectory() as _tmpdir:
+                    _tmp = Path(_tmpdir)
+                    _tk  = f"{db.upper()}__{schema.upper()}__{table.upper()}"
+                    (_tmp / f"{_tk}.json").write_text(json.dumps(profile))
+                    _an_engine = ClusteringEngine(platform, _tmp)
+                    _an_result = _an_engine.run_anomaly_detection(
+                        db, schema, table,
+                        columns=_an_features,
+                        method=_an_method,
+                        contamination=_an_contamination,
+                        sample_size=sample_size or 10_000,
+                        scaler_type=scaler_key,
+                    )
+                st.session_state[_an_data_key] = _an_result
+                try:
+                    persistence.merge_result(
+                        session, "CLUSTERING_RESULTS", db, schema, table,
+                        {"anomaly_result": _an_result},
+                    )
+                except Exception:
+                    pass
+            except Exception as _exc:
+                st.error(f"Anomaly detection failed: {_exc}")
+
+    # Restore from DB on first visit
+    if _an_data_key not in st.session_state:
+        st.session_state[_an_data_key] = (clust_data or {}).get("anomaly_result")
+
+    _an_data = st.session_state.get(_an_data_key)
+    if not _an_data:
+        st.info("Configure and click **Run** to detect anomalies.")
+    else:
+        _an_sc = _an_data.get("scatter", {})
+        _an_m1, _an_m2, _an_m3 = st.columns(3)
+        _an_m1.metric("Rows analysed", f"{_an_data.get('sample_size', 0):,}")
+        _an_m2.metric("Anomalies found", f"{_an_data.get('n_anomalies', 0):,}")
+        _an_m3.metric("Anomaly rate", f"{_an_data.get('anomaly_pct', 0):.1f}%")
+
+        # Scatter
+        _an_fig = go.Figure()
+        if _an_sc.get("normal"):
+            _an_fig.add_trace(go.Scatter(
+                x=[p["x"] for p in _an_sc["normal"]],
+                y=[p["y"] for p in _an_sc["normal"]],
+                mode="markers", name="Normal",
+                marker=dict(color="#58a6ff", size=4, opacity=0.5),
+            ))
+        if _an_sc.get("anomalies"):
+            _an_fig.add_trace(go.Scatter(
+                x=[p["x"] for p in _an_sc["anomalies"]],
+                y=[p["y"] for p in _an_sc["anomalies"]],
+                mode="markers", name="Anomaly",
+                marker=dict(color="#f85149", size=7, opacity=0.85,
+                            symbol="x"),
+            ))
+        _an_fig.update_layout(
+            title="Anomaly Detection  (PCA 2-D projection)",
+            xaxis_title=_an_sc.get("x_label", "PC1"),
+            yaxis_title=_an_sc.get("y_label", "PC2"),
+            height=480, margin=dict(t=44, b=0),
+            legend=dict(orientation="h", y=-0.06),
+        )
+        st.plotly_chart(_an_fig, use_container_width=True)
+
+        # Top anomalies table
+        _top = _an_data.get("top_anomalies", [])
+        if _top:
+            st.subheader("Top Anomalies")
+            st.caption("Rows with the highest anomaly scores, with their original feature values.")
+            _top_df = pd.DataFrame(_top)
+            cols_order = ["anomaly_score"] + [c for c in _top_df.columns if c != "anomaly_score"]
+            st.dataframe(_top_df[cols_order], use_container_width=True, hide_index=True, height=360)
+
+# ── Dimensionality Reduction tab ──────────────────────────────────────────────
+
+with tab_dimred:
+    st.caption(
+        "Project high-dimensional data into 2-D for visual exploration. "
+        "If clustering has been run the scatter is coloured by cluster."
+    )
+
+    _dr_data_key = f"dr_data_{db}__{schema}__{table}"
+
+    _dr_c1, _dr_c2, _dr_c3, _dr_c4 = st.columns([2, 2, 2, 1], gap="medium")
+    with _dr_c1:
+        _dr_method = st.selectbox(
+            "Method",
+            ["pca", "tsne", "umap"],
+            format_func=lambda m: {"pca": "PCA", "tsne": "t-SNE", "umap": "UMAP"}[m],
+            key="dr_method",
+        )
+        if _dr_method == "tsne":
+            st.caption("Sample capped at 2 000 rows — t-SNE is slow on larger sets.")
+        elif _dr_method == "umap":
+            st.caption("Requires `pip install umap-learn`.")
+    with _dr_c2:
+        _dr_features = st.multiselect(
+            "Columns", numeric_cols,
+            default=numeric_cols[:min(10, len(numeric_cols))],
+            key="dr_features",
+            label_visibility="visible",
+        )
+    with _dr_c3:
+        _dr_sample = st.slider(
+            "Sample size", 500, 10_000, 3_000, 500, key="dr_sample",
+            help="Number of rows to project.",
+        )
+    with _dr_c4:
+        st.markdown("&nbsp;", unsafe_allow_html=True)
+        _dr_run = st.button("Run", type="primary", key="dr_run",
+                            disabled=len(_dr_features) < 2,
+                            use_container_width=True)
+
+    if _dr_run and len(_dr_features) >= 2:
+        with st.spinner(f"Running {_dr_method.upper()} projection …"):
+            try:
+                with tempfile.TemporaryDirectory() as _tmpdir:
+                    _tmp = Path(_tmpdir)
+                    _tk  = f"{db.upper()}__{schema.upper()}__{table.upper()}"
+                    (_tmp / f"{_tk}.json").write_text(json.dumps(profile))
+                    _dr_engine = ClusteringEngine(platform, _tmp)
+                    _dr_result = _dr_engine.run_dim_reduction(
+                        db, schema, table,
+                        columns=_dr_features,
+                        method=_dr_method,
+                        sample_size=_dr_sample,
+                        scaler_type=scaler_key,
+                    )
+                st.session_state[_dr_data_key] = _dr_result
+                try:
+                    persistence.merge_result(
+                        session, "CLUSTERING_RESULTS", db, schema, table,
+                        {"dimred_result": _dr_result},
+                    )
+                except Exception:
+                    pass
+            except Exception as _exc:
+                st.error(f"Dimensionality reduction failed: {_exc}")
+
+    # Restore from DB on first visit
+    if _dr_data_key not in st.session_state:
+        st.session_state[_dr_data_key] = (clust_data or {}).get("dimred_result")
+
+    _dr_data = st.session_state.get(_dr_data_key)
+    if not _dr_data:
+        st.info("Configure and click **Run** to project the data.")
+    else:
+        _pts = _dr_data.get("points", [])
+        _has_clusters = any("cluster" in p for p in _pts)
+
+        _dr_fig = go.Figure()
+        if _has_clusters:
+            _dr_cluster_groups: dict = {}
+            for _p in _pts:
+                _cl = _p.get("cluster", -1)
+                _dr_cluster_groups.setdefault(_cl, []).append(_p)
+            for _li, (_cl, _cpts) in enumerate(sorted(_dr_cluster_groups.items())):
+                _is_noise = _cl == -1
+                _color    = _NOISE_COLOR if _is_noise else _PALETTE[_li % len(_PALETTE)]
+                _name     = "Noise" if _is_noise else f"Cluster {_cl}"
+                _dr_fig.add_trace(go.Scatter(
+                    x=[p["x"] for p in _cpts], y=[p["y"] for p in _cpts],
+                    mode="markers", name=_name,
+                    marker=dict(color=_color, size=4, opacity=0.7),
+                ))
+        else:
+            _dr_fig.add_trace(go.Scatter(
+                x=[p["x"] for p in _pts], y=[p["y"] for p in _pts],
+                mode="markers", name="Data",
+                marker=dict(color="#58a6ff", size=4, opacity=0.6),
+            ))
+
+        _dr_method_label = {"pca": "PCA", "tsne": "t-SNE", "umap": "UMAP"}.get(
+            _dr_data.get("method", "pca"), "Projection"
+        )
+        _dr_fig.update_layout(
+            title=f"{_dr_method_label} 2-D Projection  ({_dr_data.get('sample_size', 0):,} rows)",
+            xaxis_title=_dr_data.get("x_label", "Dim 1"),
+            yaxis_title=_dr_data.get("y_label", "Dim 2"),
+            height=520, margin=dict(t=44, b=0),
+            legend=dict(orientation="h", y=-0.06),
+        )
+        st.plotly_chart(_dr_fig, use_container_width=True)
+
+        if _dr_data.get("explained_variance"):
+            _ev = _dr_data["explained_variance"]
+            _ev_c1, _ev_c2 = st.columns(2)
+            _ev_c1.metric("PC1 variance explained", f"{_ev[0]*100:.1f}%")
+            if len(_ev) > 1:
+                _ev_c2.metric("PC2 variance explained", f"{_ev[1]*100:.1f}%")
+
+        if not _has_clusters and clust_data and clust_data.get("data_sample"):
+            st.caption(
+                "Run clustering first to colour this projection by cluster assignment."
+            )
