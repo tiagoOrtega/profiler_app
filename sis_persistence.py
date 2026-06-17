@@ -94,6 +94,18 @@ def initialize(session) -> None:
             CREATED_AT  TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
             CONSTRAINT PK_TREND PRIMARY KEY (PROFILE_KEY)
         )""",
+        f"""CREATE TABLE IF NOT EXISTS {db}.{sc}.CATALOG_EXPORTS (
+            EXPORT_KEY  VARCHAR(255) NOT NULL,
+            CONTENT_MD  VARCHAR,
+            CREATED_AT  TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+            CONSTRAINT PK_CATALOG PRIMARY KEY (EXPORT_KEY)
+        )""",
+        f"""CREATE TABLE IF NOT EXISTS {db}.{sc}.GEO_RESULTS (
+            PROFILE_KEY VARCHAR(500) NOT NULL,
+            RESULT_JSON VARCHAR,
+            CREATED_AT  TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+            CONSTRAINT PK_GEO PRIMARY KEY (PROFILE_KEY)
+        )""",
     ]
     for ddl in ddls:
         session.sql(ddl).collect()
@@ -245,6 +257,25 @@ def load_app_setting(session, key: str, default: Optional[str] = None) -> Option
         f"WHERE SETTING_KEY = '{k}'"
     ).first()
     return row[0] if row else default
+
+
+def save_catalog(session, content_md: str, export_key: str = "LATEST") -> None:
+    tbl = _tbl(session, "CATALOG_EXPORTS")
+    k   = export_key.replace("'", "''")
+    session.sql(f"DELETE FROM {tbl} WHERE EXPORT_KEY = '{k}'").collect()
+    session.sql(f"""
+        INSERT INTO {tbl} (EXPORT_KEY, CONTENT_MD)
+        SELECT '{k}', $${_dq(content_md)}$$
+    """).collect()
+
+
+def load_catalog(session, export_key: str = "LATEST") -> Optional[str]:
+    k   = export_key.replace("'", "''")
+    row = session.sql(
+        f"SELECT CONTENT_MD FROM {_tbl(session, 'CATALOG_EXPORTS')} "
+        f"WHERE EXPORT_KEY = '{k}'"
+    ).first()
+    return row[0] if row else None
 
 
 def load_all_app_settings(session) -> dict:

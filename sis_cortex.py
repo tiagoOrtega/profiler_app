@@ -301,6 +301,91 @@ def suggest_feature_engineering(
     return result or "No AI recommendation available. Check AI provider configuration."
 
 
+# ── Business report summary ───────────────────────────────────────────────────
+
+def generate_business_summary(
+    session,
+    profile:    dict,
+    clust_data: "dict | None" = None,
+    trend_data: "dict | None" = None,
+    corr_data:  "dict | None" = None,
+    model:      Optional[str] = None,
+) -> dict:
+    """Return {executive_summary, recommendations} for the business report."""
+    rows     = profile.get("row_count", 0)
+    cols_all = profile.get("columns", [])
+    numeric  = [c for c in cols_all if c.get("mean") is not None]
+    nullish  = [c for c in cols_all if c.get("null_rate", 0) > 0.2]
+
+    ctx = [
+        f"Table: {profile.get('database')}.{profile.get('schema')}.{profile.get('table')}",
+        f"Size: {rows:,} rows, {profile.get('column_count', 0)} columns "
+        f"({len(numeric)} numeric)",
+        f"Columns with >20% nulls: {len(nullish)}",
+    ]
+
+    if clust_data and clust_data.get("n_clusters"):
+        sil = clust_data.get("metrics", {}).get("silhouette_score", 0)
+        ctx.append(
+            f"Clustering: {clust_data['n_clusters']} segments, "
+            f"model={clust_data.get('model_label', '')}, silhouette={sil:.3f}"
+        )
+
+    if trend_data and trend_data.get("metrics"):
+        mets = trend_data["metrics"]
+        up   = sum(1 for m in mets.values()
+                   if isinstance(m, dict) and m.get("trend", {}).get("direction") == "up")
+        dn   = sum(1 for m in mets.values()
+                   if isinstance(m, dict) and m.get("trend", {}).get("direction") == "down")
+        ctx.append(
+            f"Trends ({trend_data.get('period','month')}ly): "
+            f"{up} growing, {dn} declining out of {len(mets)} metrics"
+        )
+
+    if corr_data and corr_data.get("columns"):
+        cols_c  = corr_data["columns"]
+        matrix  = corr_data.get("matrix", [])
+        high_cr = []
+        for i in range(len(cols_c)):
+            for j in range(i + 1, len(cols_c)):
+                if i < len(matrix) and j < len(matrix[i]) and matrix[i][j] is not None:
+                    if abs(matrix[i][j]) >= 0.7:
+                        high_cr.append(f"{cols_c[i]}<->{cols_c[j]}")
+        if high_cr:
+            ctx.append(f"Strong correlations: {', '.join(high_cr[:4])}")
+
+    context = "\n".join(ctx)
+    prompt = (
+        f"You are a senior data analyst writing an executive report for business stakeholders.\n\n"
+        f"Data context:\n{context}\n\n"
+        f"Write exactly two clearly labelled sections:\n\n"
+        f"EXECUTIVE SUMMARY:\n"
+        f"2-3 sentences covering what this dataset is, its quality status, and the most "
+        f"important finding. Avoid technical jargon.\n\n"
+        f"RECOMMENDATIONS:\n"
+        f"3-5 specific, actionable bullet points (start each with a dash '-') for the data or "
+        f"business team. Be concrete, not generic."
+    )
+    raw = complete(session, prompt, model)
+
+    if not raw:
+        return {
+            "executive_summary": "AI insights unavailable. Check provider in Configuration.",
+            "recommendations":   "",
+        }
+
+    exec_sum, recs = raw, ""
+    for marker in ("RECOMMENDATIONS:", "RECOMMENDATIONS\n", "Recommendations:"):
+        if marker in raw:
+            idx      = raw.index(marker)
+            exec_sum = raw[:idx].replace("EXECUTIVE SUMMARY:", "").replace(
+                "EXECUTIVE SUMMARY\n", "").strip()
+            recs     = raw[idx + len(marker):].strip()
+            break
+
+    return {"executive_summary": exec_sum, "recommendations": recs}
+
+
 # ── Clustering insights ───────────────────────────────────────────────────────
 
 def explain_clusters(
@@ -406,3 +491,74 @@ def explain_visual_insights(
     )
     result = complete(session, prompt, model)
     return result or "No AI insights available. Check AI provider configuration."
+
+
+def explain_geolocation(
+    session,
+    geo_data: dict,
+    model: Optional[str] = None,
+) -> str:
+    """Generate AI insights from aggregated geolocation sales data."""
+    by_country   = sorted(
+        geo_data.get("by_country", []),
+        key=lambda x: x.get("total_revenue", 0), reverse=True,
+    )
+    by_continent = geo_data.get("by_continent", [])
+
+    ctx = [
+        f"Table: {geo_data.get('table', 'GOLD_FACT_ORDERS')}",
+        f"Date range: {geo_data.get('min_date', '?')} to {geo_data.get('max_date', '?')}",
+        f"Total orders: {geo_data.get('total_orders', 0):,}",
+        f"Countries active: {geo_data.get('n_countries', 0)}",
+        f"Cities active: {geo_data.get('n_cities', 0)}",
+        "",
+        "Revenue by continent:",
+    ]
+    for row in sorted(by_continent, key=lambda r: r.get("total_revenue", 0), reverse=True):
+        ctx.append(
+            f"  {row['continent']}: ${row['total_revenue']:,.0f}  "
+            f"({row.get('pct_revenue', 0):.1f}%)  {row.get('order_count', 0):,} orders"
+        )
+
+    ctx.append("\nTop 10 countries by revenue:")
+    for row in by_country[:10]:
+        ctx.append(
+            f"  {row['country']} ({row['continent']}): "
+            f"${row['total_revenue']:,.0f}  |  "
+            f"{row.get('order_count', 0):,} orders  |  "
+            f"avg ${row.get('avg_order_value', 0):,.0f}"
+        )
+
+    ctx.append("\nTop 5 cities by revenue:")
+    for row in geo_data.get("by_city", [])[:5]:
+        ctx.append(
+            f"  {row.get('city')}, {row.get('country')}: "
+            f"${row.get('total_revenue', 0):,.0f}  ({row.get('order_count', 0):,} orders)"
+        )
+
+    prompt = (
+        "You are a senior business intelligence analyst with expertise in global market strategy. "
+        "Analyze the following worldwide sales geolocation data and provide 4-6 specific, "
+        "actionable insights covering: (1) top-performing markets and why, (2) underperforming "
+        "regions with growth potential, (3) regional patterns or anomalies, (4) recommended "
+        "geographic expansion or investment priorities.\n\n"
+        + "\n".join(ctx)
+        + "\n\nFormat as bullet points. Be specific, data-driven, and actionable."
+    )
+
+    result = complete(session, prompt, model)
+    if result:
+        return result
+
+    top3 = by_country[:3]
+    if not top3:
+        return "No geolocation data available."
+    leaders = ", ".join(
+        f"{r['country']} (${r['total_revenue']:,.0f})" for r in top3
+    )
+    conts = {r["continent"] for r in by_country}
+    return (
+        f"Top markets: {leaders}. "
+        f"Operations span {len(by_country)} countries across {len(conts)} continents. "
+        f"Consider expanding presence in under-indexed regions to diversify revenue."
+    )
