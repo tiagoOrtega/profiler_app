@@ -137,6 +137,9 @@ pg = st.navigation([
     st.Page("pages/3_Relationships.py", title="Relationships"),
     st.Page("pages/4_Clustering.py",    title="Clustering"),
     st.Page("pages/7_Trends.py",        title="Trends"),
+    st.Page("pages/8_Catalog.py",       title="Catalog"),
+    st.Page("pages/9_Summary.py",        title="Business Report"),
+    st.Page("pages/10_Geolocation.py",  title="Geolocation"),
     st.Page("pages/5_Configuration.py", title="Configuration"),
     st.Page("pages/6_Help.py",          title="Help"),
 ])
